@@ -15,7 +15,7 @@
 //
 //   output/
 //     launcher.exe   <- this program
-//     config.ini     <- seeded from the baked-in default if missing
+//     config.toml    <- seeded from the baked-in default if missing
 //     catalog.json   <- the game list (name / exe / image), seeded likewise
 //     images/        <- 600x900 cover art, dropped in by hand
 //     games/         <- the actual game installs
@@ -27,15 +27,15 @@
 // exactly one launcher process (WebView2 still spawns its own renderer
 // process — that is inherent to the engine and cannot be merged away).
 //
-// config.ini, catalog.json, images/ and games/ are never overwritten once
+// config.toml, catalog.json, images/ and games/ are never overwritten once
 // present, so hand-dropped content survives every build.
 //
 // Window sizing (see the `Window size` constants below): the window wraps the
 // covers on both axes — covers aim for a fraction of the screen width and the
 // window is just big enough for them plus margins — but two caps (max width
 // and max height fraction of the screen) shrink the covers to fit when they'd
-// be too big. Rust picks the window size and the CSS in ui/index.html fits
-// the covers into it; the shared border/image gap numbers (from config.ini,
+// be too big. Rust picks the window size and the CSS in src/index.html fits
+// the covers into it; the shared border/image gap numbers (from config.toml,
 // mirrored as PAD/GAP in the page) keep the two in step.
 //
 // No console window: this is a GUI app, not a CLI tool.
@@ -56,11 +56,21 @@ use tao::window::WindowBuilder;
 use wry::http::{header::CONTENT_TYPE, Request, Response};
 use wry::{WebContext, WebViewBuilder, WebViewBuilderExtWindows};
 
-/// The UI assets (index.html and anything beside it), baked into the exe
-/// at compile time and served over the `app://` protocol at runtime.
+/// The UI assets, baked into the exe at compile time and served over the
+/// `app://` protocol at runtime. They live in `src/` beside the Rust source,
+/// so the include list keeps main.rs and the seed files (config.toml,
+/// catalog.json) out of the bundle — `is_ui_asset` mirrors it at runtime.
 #[derive(RustEmbed)]
-#[folder = "ui/"]
+#[folder = "src/"]
+#[include = "*.html"]
+#[include = "*.css"]
+#[include = "*.js"]
 struct UiAssets;
+
+/// Extensions the `app://` protocol will serve as UI assets. Mirrors the
+/// rust-embed include list above so the live-from-`src/` dev path can't hand
+/// out main.rs or the seed files.
+const UI_ASSET_EXTENSIONS: [&str; 3] = ["html", "css", "js"];
 
 // ── Window size ──────────────────────────────────────────────────────────
 // Each cover wants to be IMAGE_WIDTH_FRACTION of the screen width (its
@@ -73,7 +83,7 @@ struct UiAssets;
 // and the window may not exceed MAX_HEIGHT_FRACTION of the screen. Whichever
 // cap bites first sets a single scale (≤1) applied to the covers, so when
 // they shrink they shrink on both axes — the width each one contributes
-// shrinks by the same factor. The CSS in ui/index.html reproduces the same
+// shrinks by the same factor. The CSS in src/index.html reproduces the same
 // fit independently, scaling covers DOWN only.
 const IMAGE_WIDTH_FRACTION: f64 = 0.16; // each cover's target width ≈ this × screen width
 const MAX_WIDTH_FRACTION: f64 = 0.90; // the cover row may not exceed this × screen width
@@ -82,11 +92,11 @@ const MAX_HEIGHT_FRACTION: f64 = 0.80; // the window may not exceed this × scre
 // 600x900 (2:3) cover art this launcher is built around.
 const COVER_NATIVE_WIDTH: f64 = 600.0;
 const COVER_NATIVE_HEIGHT: f64 = 900.0;
-// Defaults for the look-and-feel knobs exposed in config.ini. They match the
-// values baked into ui/index.html's CSS, so an existing install with no new
+// Defaults for the look-and-feel knobs exposed in config.toml. They match the
+// values baked into src/index.html's CSS, so an existing install with no new
 // keys renders exactly as before. The two spacing values (border gap around
 // the covers and gap between them) are also used by the window-sizing math
-// below and mirrored as PAD/GAP in ui/index.html, so the computed size and the
+// below and mirrored as PAD/GAP in src/index.html, so the computed size and the
 // CSS layout agree — see load_config / window_size.
 const DEFAULT_BORDER_GAP: f64 = 36.0; // empty space between window edge and covers
 const DEFAULT_IMAGE_GAP: f64 = 32.0; // gap between adjacent covers
@@ -102,8 +112,8 @@ const FALLBACK_WINDOW_H: f64 = 800.0;
 
 /// Baked-in defaults so a fresh `output/` can be seeded with no repo around
 /// (e.g. on a real cartridge).
-const DEFAULT_INI: &str = include_str!("../config.ini");
-const DEFAULT_CATALOG: &str = include_str!("../catalog.json");
+const DEFAULT_CONFIG: &str = include_str!("config.toml");
+const DEFAULT_CATALOG: &str = include_str!("catalog.json");
 
 #[derive(Deserialize, Clone)]
 #[allow(dead_code)] // `name` and `image` are only read on the JS side.
@@ -115,7 +125,7 @@ struct Game {
 
 struct Config {
     show_captions: bool,
-    // Look-and-feel knobs, all read from config.ini (with the DEFAULT_*
+    // Look-and-feel knobs, all read from config.toml (with the DEFAULT_*
     // fallbacks above). Numeric values are CSS pixels; colors are any CSS
     // color string. border_gap and image_gap also feed the window-sizing math.
     border_gap: f64,
@@ -181,7 +191,7 @@ fn resolve_base_dir() -> PathBuf {
     }
 }
 
-/// Creates the content folders, seeds config.ini/catalog.json if they're
+/// Creates the content folders, seeds config.toml/catalog.json if they're
 /// missing, and refreshes the deployed exe. Existing content is never
 /// touched, so hand-dropped covers, games and edits survive every build.
 fn ensure_layout(base: &Path) {
@@ -189,7 +199,7 @@ fn ensure_layout(base: &Path) {
         fs::create_dir_all(base.join(sub))
             .unwrap_or_else(|e| panic!("failed to create output/{sub}/: {e}"));
     }
-    seed_if_missing(&base.join("config.ini"), DEFAULT_INI);
+    seed_if_missing(&base.join("config.toml"), DEFAULT_CONFIG);
     seed_if_missing(&base.join("catalog.json"), DEFAULT_CATALOG);
     refresh_deployed_exe(base);
 }
@@ -305,9 +315,9 @@ fn window_size<T>(
     (width.max(1.0), height.max(1.0))
 }
 
-/// Reads config.ini (already seeded by `ensure_layout`). Unknown keys and
-/// unparseable values are ignored, leaving that setting at its default, so an
-/// older config.ini (or a typo) still yields a usable launcher.
+/// Reads config.toml (already seeded by `ensure_layout`). Unknown keys and
+/// unusable values are ignored, leaving that setting at its default, so an
+/// older config.toml (or a typo in one value) still yields a usable launcher.
 fn load_config(base_dir: &Path) -> Config {
     let mut config = Config {
         show_captions: false,
@@ -320,39 +330,51 @@ fn load_config(base_dir: &Path) -> Config {
         shadow_color: DEFAULT_SHADOW_COLOR.to_string(),
     };
 
-    if let Ok(contents) = fs::read_to_string(base_dir.join("config.ini")) {
-        for line in contents.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            let Some((key, value)) = line.split_once('=') else {
-                continue;
-            };
-            let value = value.trim();
-            match key.trim() {
-                "show_captions" => config.show_captions = value.eq_ignore_ascii_case("true"),
-                "border_gap" => set_f64(&mut config.border_gap, value),
-                "image_gap" => set_f64(&mut config.image_gap, value),
-                "corner_radius" => set_f64(&mut config.corner_radius, value),
-                "background_color" => config.background_color = value.to_string(),
-                "shadow_size" => set_f64(&mut config.shadow_size, value),
-                "shadow_fade" => set_f64(&mut config.shadow_fade, value),
-                "shadow_color" => config.shadow_color = value.to_string(),
-                _ => {}
-            }
-        }
+    let Ok(contents) = fs::read_to_string(base_dir.join("config.toml")) else {
+        return config;
+    };
+    // Read as a plain table, key by key, rather than deserialized into a
+    // struct: one wrong-typed value then costs only that setting instead of
+    // rejecting the whole file. A file that isn't valid TOML at all is the one
+    // case that falls back to every default.
+    let Ok(table) = contents.parse::<toml::Table>() else {
+        return config;
+    };
+
+    if let Some(value) = table.get("show_captions").and_then(|v| v.as_bool()) {
+        config.show_captions = value;
     }
+    set_f64(&mut config.border_gap, table.get("border_gap"));
+    set_f64(&mut config.image_gap, table.get("image_gap"));
+    set_f64(&mut config.corner_radius, table.get("corner_radius"));
+    set_color(&mut config.background_color, table.get("background_color"));
+    set_f64(&mut config.shadow_size, table.get("shadow_size"));
+    set_f64(&mut config.shadow_fade, table.get("shadow_fade"));
+    set_color(&mut config.shadow_color, table.get("shadow_color"));
 
     config
 }
 
-/// Overwrites `slot` only if `value` parses as a non-negative number, so a
-/// blank or garbled entry leaves the default in place rather than zeroing it.
-fn set_f64(slot: &mut f64, value: &str) {
-    if let Ok(parsed) = value.parse::<f64>() {
-        if parsed.is_finite() && parsed >= 0.0 {
-            *slot = parsed;
+/// Overwrites `slot` only if `value` is a non-negative TOML number (written
+/// either as an integer or a float), so a missing or garbled entry leaves the
+/// default in place rather than zeroing it.
+fn set_f64(slot: &mut f64, value: Option<&toml::Value>) {
+    let parsed = match value {
+        Some(toml::Value::Integer(n)) => *n as f64,
+        Some(toml::Value::Float(f)) => *f,
+        _ => return,
+    };
+    if parsed.is_finite() && parsed >= 0.0 {
+        *slot = parsed;
+    }
+}
+
+/// Overwrites `slot` only if `value` is a non-blank string, so a missing,
+/// empty or wrong-typed entry keeps the default color.
+fn set_color(slot: &mut String, value: Option<&toml::Value>) {
+    if let Some(color) = value.and_then(|v| v.as_str()) {
+        if !color.trim().is_empty() {
+            *slot = color.trim().to_string();
         }
     }
 }
@@ -468,7 +490,7 @@ fn run_app(base_dir: &Path) -> wry::Result<()> {
     });
 }
 
-/// Serves the UI from the baked-in `ui/` assets, and `images/...` /
+/// Serves the UI from the baked-in `src/` assets, and `images/...` /
 /// `games/...` straight from the content folder beside the exe, so paths in
 /// catalog.json and `<img>` tags are just relative to the launcher's folder.
 fn handle_app_request(base_dir: &Path, request: Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
@@ -488,12 +510,18 @@ fn handle_app_request(base_dir: &Path, request: Request<Vec<u8>>) -> Response<Co
         };
     }
 
-    // Everything else is a UI asset. Prefer the live file from the source
-    // `ui/` folder when it exists — under `cargo run` that's the repo, so
-    // edits show up on the next launch with no rebuild. When it's absent
-    // (the deployed cartridge has no source tree), fall back to the copy
-    // baked into the exe by rust-embed.
-    let source_ui = Path::new(env!("CARGO_MANIFEST_DIR")).join("ui").join(path);
+    // Everything else is a UI asset, and only the web files count as one:
+    // `src/` also holds main.rs and the config.toml / catalog.json seeds, and
+    // neither the live path below nor rust-embed should ever hand those out.
+    if !is_ui_asset(path) {
+        return not_found();
+    }
+
+    // Prefer the live file from the source `src/` folder when it exists —
+    // under `cargo run` that's the repo, so edits show up on the next launch
+    // with no rebuild. When it's absent (the deployed cartridge has no source
+    // tree), fall back to the copy baked into the exe by rust-embed.
+    let source_ui = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(path);
     if let Ok(bytes) = fs::read(&source_ui) {
         let mime = mime_type_for(Path::new(path), &bytes);
         return ok_response(mime, Cow::Owned(bytes));
@@ -518,6 +546,16 @@ fn ok_response(mime: &'static str, body: Cow<'static, [u8]>) -> Response<Cow<'st
         .header("Cache-Control", "no-store")
         .body(body)
         .unwrap()
+}
+
+/// Whether an `app://` path names one of the web files that make up the UI.
+/// Mirrors the rust-embed include list on `UiAssets`, so the dev (live from
+/// `src/`) and deployed (embedded) paths serve exactly the same set.
+fn is_ui_asset(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|ext| UI_ASSET_EXTENSIONS.contains(&ext))
 }
 
 fn not_found() -> Response<Cow<'static, [u8]>> {

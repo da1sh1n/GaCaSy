@@ -13,8 +13,8 @@
 <style>
   :root {
     color-scheme: dark;
-    /* Look-and-feel knobs. These fallbacks match the config.ini defaults; the
-       script below overrides them from window.__UI__ (fed by config.ini). */
+    /* Look-and-feel knobs. These fallbacks match the config.toml defaults; the
+       script below overrides them from window.__UI__ (fed by config.toml). */
     --background-color: #1b1229;
     --image-gap: 32px;
     --corner-radius: 14px;
@@ -116,7 +116,7 @@
   <div id="grid"></div>
 
   <script>
-    // Look-and-feel settings from config.ini (see Rust's init_script). Fall
+    // Look-and-feel settings from config.toml (see Rust's init_script). Fall
     // back to the same defaults as the CSS above when a value is absent.
     const ui = window.__UI__ || {};
 
