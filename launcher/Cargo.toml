@@ -2,6 +2,7 @@
 name = "launcher"
 version = "0.1.0"
 edition = "2024"
+license = "GPL-3.0-or-later"
 
 [dependencies]
 serde = { version = "1.0.229", features = ["derive"] }
@@ -13,5 +14,6 @@ wry = { version = "0.55.1", features = ["protocol"] }
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
+    "Win32_Security",
     "Win32_System_Threading",
 ] }

@@ -1,3 +1,9 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 da1sh1n
+// This file is part of GaCaSy, licensed under the GNU General Public License
+// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// or <https://www.gnu.org/licenses/> for details.
+
 // Cartridge launcher shell.
 //
 // The whole UI (HTML/CSS/JS) is baked into this exe with rust-embed and
@@ -13,7 +19,7 @@
 //     catalog.json   <- the game list (name / exe / image), seeded likewise
 //     images/        <- 600x900 cover art, dropped in by hand
 //     games/         <- the actual game installs
-//     ui/            <- WebView2's own data folder (its only on-disk crumbs)
+//     EBWebView/     <- WebView2's own data folder (its only on-disk crumbs)
 //
 // `cargo run` builds into target/ and runs in place, resolving `output/`
 // as its content directory and refreshing `output/launcher.exe` so the
@@ -23,6 +29,14 @@
 //
 // config.ini, catalog.json, images/ and games/ are never overwritten once
 // present, so hand-dropped content survives every build.
+//
+// Window sizing (see the `Window size` constants below): the window wraps the
+// covers on both axes — covers aim for a fraction of the screen width and the
+// window is just big enough for them plus margins — but two caps (max width
+// and max height fraction of the screen) shrink the covers to fit when they'd
+// be too big. Rust picks the window size and the CSS in ui/index.html fits
+// the covers into it; the shared border/image gap numbers (from config.ini,
+// mirrored as PAD/GAP in the page) keep the two in step.
 //
 // No console window: this is a GUI app, not a CLI tool.
 #![windows_subsystem = "windows"]
@@ -48,21 +62,48 @@ use wry::{WebContext, WebViewBuilder, WebViewBuilderExtWindows};
 #[folder = "ui/"]
 struct UiAssets;
 
+// ── Window size ──────────────────────────────────────────────────────────
+// Each cover wants to be IMAGE_WIDTH_FRACTION of the screen width (its
+// "target" size), but never larger than its native pixels. The window then
+// wraps the covers on BOTH axes — width = the row of covers + gaps + margins,
+// height = one cover + margins — so with no crowding the window is just big
+// enough for the covers at target size.
+//
+// Two caps bound it: the row may not exceed MAX_WIDTH_FRACTION of the screen,
+// and the window may not exceed MAX_HEIGHT_FRACTION of the screen. Whichever
+// cap bites first sets a single scale (≤1) applied to the covers, so when
+// they shrink they shrink on both axes — the width each one contributes
+// shrinks by the same factor. The CSS in ui/index.html reproduces the same
+// fit independently, scaling covers DOWN only.
+const IMAGE_WIDTH_FRACTION: f64 = 0.16; // each cover's target width ≈ this × screen width
+const MAX_WIDTH_FRACTION: f64 = 0.90; // the cover row may not exceed this × screen width
+const MAX_HEIGHT_FRACTION: f64 = 0.80; // the window may not exceed this × screen height
+// Native cover resolution, so a cover is never scaled up past it. Assumes the
+// 600x900 (2:3) cover art this launcher is built around.
+const COVER_NATIVE_WIDTH: f64 = 600.0;
+const COVER_NATIVE_HEIGHT: f64 = 900.0;
+// Defaults for the look-and-feel knobs exposed in config.ini. They match the
+// values baked into ui/index.html's CSS, so an existing install with no new
+// keys renders exactly as before. The two spacing values (border gap around
+// the covers and gap between them) are also used by the window-sizing math
+// below and mirrored as PAD/GAP in ui/index.html, so the computed size and the
+// CSS layout agree — see load_config / window_size.
+const DEFAULT_BORDER_GAP: f64 = 36.0; // empty space between window edge and covers
+const DEFAULT_IMAGE_GAP: f64 = 32.0; // gap between adjacent covers
+const DEFAULT_CORNER_RADIUS: f64 = 14.0; // cover corner rounding
+const DEFAULT_BACKGROUND_COLOR: &str = "#1b1229";
+const DEFAULT_SHADOW_SIZE: f64 = 24.0; // how far the shadow reaches from the cover
+const DEFAULT_SHADOW_FADE: f64 = 0.0; // solid-color reach before it starts fading
+const DEFAULT_SHADOW_COLOR: &str = "rgba(0, 0, 0, 0.55)";
+// Used only when the monitor size can't be read (logical pixels).
+const FALLBACK_WINDOW_W: f64 = 1280.0;
+const FALLBACK_WINDOW_H: f64 = 800.0;
+// ─────────────────────────────────────────────────────────────────────────
+
 /// Baked-in defaults so a fresh `output/` can be seeded with no repo around
 /// (e.g. on a real cartridge).
 const DEFAULT_INI: &str = include_str!("../config.ini");
 const DEFAULT_CATALOG: &str = include_str!("../catalog.json");
-
-// Card layout constants. These mirror the CSS in ui/index.html (.card width,
-// the 600x900 cover aspect ratio, .card .caption height, #grid gap/padding)
-// so the window can be sized to fit its content exactly before the webview
-// ever paints, instead of guessing a fixed size.
-const CARD_WIDTH: u32 = 200;
-const CARD_IMAGE_HEIGHT: u32 = CARD_WIDTH * 900 / 600;
-const CARD_CAPTION_HEIGHT: u32 = 30; // 10px margin-top + 20px line-height
-const GRID_GAP: u32 = 32;
-const GRID_PADDING_X: u32 = 40; // #grid's own left/right padding
-const WINDOW_MARGIN_Y: u32 = 56; // clears the close button and adds breathing room
 
 #[derive(Deserialize, Clone)]
 #[allow(dead_code)] // `name` and `image` are only read on the JS side.
@@ -74,6 +115,16 @@ struct Game {
 
 struct Config {
     show_captions: bool,
+    // Look-and-feel knobs, all read from config.ini (with the DEFAULT_*
+    // fallbacks above). Numeric values are CSS pixels; colors are any CSS
+    // color string. border_gap and image_gap also feed the window-sizing math.
+    border_gap: f64,
+    image_gap: f64,
+    corner_radius: f64,
+    background_color: String,
+    shadow_size: f64,
+    shadow_fade: f64,
+    shadow_color: String,
 }
 
 enum UserEvent {
@@ -84,14 +135,34 @@ fn main() -> wry::Result<()> {
     let base_dir = resolve_base_dir();
     ensure_layout(&base_dir);
 
-    // Nothing listens on a port: a second launch is fended off with a named
-    // mutex that the OS releases automatically when this process dies.
-    let _instance = match acquire_single_instance() {
-        Some(guard) => guard,
-        None => return Ok(()),
+    // Single-instance is enforced only for the shipped launcher (the exe in
+    // output/). Under `cargo run` it is deliberately skipped so a rebuild
+    // always opens a fresh window instead of silently exiting when an older
+    // run is still on screen holding the lock — the classic "my change did
+    // nothing" trap during development. Nothing listens on a port: the guard
+    // is a named mutex the OS releases when the process dies.
+    let _instance = if running_deployed() {
+        match acquire_single_instance() {
+            Some(guard) => Some(guard),
+            None => return Ok(()),
+        }
+    } else {
+        None
     };
 
     run_app(&base_dir)
+}
+
+/// True when this is the deployed launcher (its exe sits in `output/`) rather
+/// than a `cargo run` build out of `target/`.
+fn running_deployed() -> bool {
+    let Ok(exe) = env::current_exe() else {
+        return false;
+    };
+    exe.parent()
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str())
+        == Some("output")
 }
 
 /// The folder holding `launcher.exe` and all cartridge content.
@@ -100,14 +171,11 @@ fn main() -> wry::Result<()> {
 /// folder is the base. Under `cargo run` the exe lives in target/, so the
 /// base is the repo's own `output/`.
 fn resolve_base_dir() -> PathBuf {
-    let exe = env::current_exe().expect("failed to resolve current exe path");
-    let exe_dir = exe
-        .parent()
-        .expect("current exe has no parent directory")
-        .to_path_buf();
-
-    if exe_dir.file_name().and_then(|n| n.to_str()) == Some("output") {
-        exe_dir
+    if running_deployed() {
+        let exe = env::current_exe().expect("failed to resolve current exe path");
+        exe.parent()
+            .expect("current exe has no parent directory")
+            .to_path_buf()
     } else {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("output")
     }
@@ -117,7 +185,7 @@ fn resolve_base_dir() -> PathBuf {
 /// missing, and refreshes the deployed exe. Existing content is never
 /// touched, so hand-dropped covers, games and edits survive every build.
 fn ensure_layout(base: &Path) {
-    for sub in ["games", "images", "ui"] {
+    for sub in ["games", "images", "EBWebView"] {
         fs::create_dir_all(base.join(sub))
             .unwrap_or_else(|e| panic!("failed to create output/{sub}/: {e}"));
     }
@@ -194,33 +262,99 @@ fn acquire_single_instance() -> Option<InstanceGuard> {
     Some(InstanceGuard)
 }
 
-/// Size the borderless window needs to fit `game_count` cards in a single
-/// row with no clipping or extra dead space.
-fn compute_window_size(game_count: usize, show_captions: bool) -> (u32, u32) {
-    let n = game_count.max(1) as u32;
-    let card_height = CARD_IMAGE_HEIGHT + if show_captions { CARD_CAPTION_HEIGHT } else { 0 };
-    let width = 2 * GRID_PADDING_X + n * CARD_WIDTH + n.saturating_sub(1) * GRID_GAP;
-    let height = card_height + 2 * WINDOW_MARGIN_Y;
-    (width, height)
+/// The window size in logical (CSS) pixels — it wraps the covers on both
+/// axes, with the covers scaled to satisfy the width and height caps.
+///
+/// Logical pixels so these numbers, and the gap/margin, are the same units the
+/// CSS uses — the computed size and the page layout stay in step at any DPI.
+/// (The caps are still true fractions of the screen: the logical screen size
+/// is the physical size divided by the same scale factor.)
+fn window_size<T>(
+    event_loop: &tao::event_loop::EventLoop<T>,
+    game_count: usize,
+    gap: f64,
+    margin: f64,
+) -> (f64, f64) {
+    let Some(monitor) = event_loop.primary_monitor() else {
+        return (FALLBACK_WINDOW_W, FALLBACK_WINDOW_H);
+    };
+    let scale = monitor.scale_factor();
+    let size = monitor.size();
+    let screen_w = size.width as f64 / scale;
+    let screen_h = size.height as f64 / scale;
+    let n = game_count.max(1) as f64;
+
+    // Target ("unscaled") cover size: the set fraction of screen width, but
+    // never larger than the native cover so it's never scaled up.
+    let target_w = (IMAGE_WIDTH_FRACTION * screen_w).min(COVER_NATIVE_WIDTH);
+    let target_h = target_w * (COVER_NATIVE_HEIGHT / COVER_NATIVE_WIDTH);
+
+    // The largest scale (never above 1) that keeps the row of covers within
+    // the width cap and one cover within the height cap. Whichever cap bites
+    // hardest wins, and shrinks the covers on both axes together.
+    let width_room = MAX_WIDTH_FRACTION * screen_w - (n - 1.0) * gap - 2.0 * margin;
+    let height_room = MAX_HEIGHT_FRACTION * screen_h - 2.0 * margin;
+    let fit_width = width_room / (n * target_w);
+    let fit_height = height_room / target_h;
+    let cover_scale = 1.0_f64.min(fit_width).min(fit_height).max(0.0);
+
+    let cover_w = target_w * cover_scale;
+    let cover_h = target_h * cover_scale;
+    let width = n * cover_w + (n - 1.0) * gap + 2.0 * margin;
+    let height = cover_h + 2.0 * margin;
+    (width.max(1.0), height.max(1.0))
 }
 
-/// Reads config.ini (already seeded by `ensure_layout`).
+/// Reads config.ini (already seeded by `ensure_layout`). Unknown keys and
+/// unparseable values are ignored, leaving that setting at its default, so an
+/// older config.ini (or a typo) still yields a usable launcher.
 fn load_config(base_dir: &Path) -> Config {
-    let mut show_captions = false;
+    let mut config = Config {
+        show_captions: false,
+        border_gap: DEFAULT_BORDER_GAP,
+        image_gap: DEFAULT_IMAGE_GAP,
+        corner_radius: DEFAULT_CORNER_RADIUS,
+        background_color: DEFAULT_BACKGROUND_COLOR.to_string(),
+        shadow_size: DEFAULT_SHADOW_SIZE,
+        shadow_fade: DEFAULT_SHADOW_FADE,
+        shadow_color: DEFAULT_SHADOW_COLOR.to_string(),
+    };
+
     if let Ok(contents) = fs::read_to_string(base_dir.join("config.ini")) {
         for line in contents.lines() {
             let line = line.trim();
             if line.is_empty() || line.starts_with('#') {
                 continue;
             }
-            if let Some((key, value)) = line.split_once('=') {
-                if key.trim() == "show_captions" {
-                    show_captions = value.trim().eq_ignore_ascii_case("true");
-                }
+            let Some((key, value)) = line.split_once('=') else {
+                continue;
+            };
+            let value = value.trim();
+            match key.trim() {
+                "show_captions" => config.show_captions = value.eq_ignore_ascii_case("true"),
+                "border_gap" => set_f64(&mut config.border_gap, value),
+                "image_gap" => set_f64(&mut config.image_gap, value),
+                "corner_radius" => set_f64(&mut config.corner_radius, value),
+                "background_color" => config.background_color = value.to_string(),
+                "shadow_size" => set_f64(&mut config.shadow_size, value),
+                "shadow_fade" => set_f64(&mut config.shadow_fade, value),
+                "shadow_color" => config.shadow_color = value.to_string(),
+                _ => {}
             }
         }
     }
-    Config { show_captions }
+
+    config
+}
+
+/// Overwrites `slot` only if `value` parses as a non-negative number, so a
+/// blank or garbled entry leaves the default in place rather than zeroing it.
+fn set_f64(slot: &mut f64, value: &str) {
+    if let Ok(parsed) = value.parse::<f64>() {
+        if parsed.is_finite() && parsed >= 0.0 {
+            *slot = parsed;
+        }
+    }
 }
 
 fn run_app(base_dir: &Path) -> wry::Result<()> {
@@ -232,29 +366,45 @@ fn run_app(base_dir: &Path) -> wry::Result<()> {
     let games: Vec<Game> = serde_json::from_str(&catalog_json)
         .unwrap_or_else(|e| panic!("failed to parse {}: {e}", catalog_path.display()));
 
-    // Hands the parsed game list (and config) to the page as globals before
+    // Hands the parsed game list and config to the page as globals before
     // its own scripts run, since fetching catalog.json via `fetch()` would
-    // hit CORS restrictions.
+    // hit CORS restrictions. The page lays itself out responsively to fill
+    // whatever window size we pick below.
+    // Pack the look-and-feel knobs into one object the page reads before its
+    // own scripts run. serde_json handles escaping the color strings safely.
+    let ui_settings = serde_json::json!({
+        "borderGap": config.border_gap,
+        "imageGap": config.image_gap,
+        "cornerRadius": config.corner_radius,
+        "backgroundColor": config.background_color,
+        "shadowSize": config.shadow_size,
+        "shadowFade": config.shadow_fade,
+        "shadowColor": config.shadow_color,
+    });
     let init_script = format!(
-        "window.__GAMES__ = {catalog_json}; window.__SHOW_CAPTIONS__ = {};",
-        config.show_captions
+        "window.__GAMES__ = {catalog_json}; window.__SHOW_CAPTIONS__ = {}; window.__UI__ = {};",
+        config.show_captions, ui_settings
     );
 
-    // WebView2's user-data folder is the engine's only on-disk footprint;
-    // parking it in output/ui/ keeps its cache out of the content folders.
-    let mut web_context = WebContext::new(Some(base_dir.join("ui")));
+    // WebView2's user-data folder is the engine's only on-disk footprint. We
+    // point it at output/ itself, so the engine drops its (fixed-name)
+    // EBWebView cache folder straight in there rather than under an extra
+    // wrapper. ensure_layout pre-creates that folder so it's present from the
+    // first launch.
+    let mut web_context = WebContext::new(Some(base_dir.to_path_buf()));
 
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
 
-    let (window_width, window_height) = compute_window_size(games.len(), config.show_captions);
+    let (window_width, window_height) =
+        window_size(&event_loop, games.len(), config.image_gap, config.border_gap);
 
     let window = WindowBuilder::new()
         .with_title("Cartridge Launcher")
-        // Logical, not physical: these numbers are CSS pixels from
-        // ui/index.html, so the OS must scale them to this monitor's DPI
-        // itself, same as the webview scales its CSS.
-        .with_inner_size(LogicalSize::new(window_width as f64, window_height as f64))
+        // Logical (CSS) pixels, so the size matches the units the page's CSS
+        // uses; the OS scales to this monitor's DPI. The page then fits the
+        // covers into this size.
+        .with_inner_size(LogicalSize::new(window_width, window_height))
         .with_resizable(false)
         .with_decorations(false)
         .with_always_on_top(false)
@@ -304,6 +454,8 @@ fn run_app(base_dir: &Path) -> wry::Result<()> {
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
+        // Keep the webview alive for the window's lifetime.
+        let _ = &_webview;
 
         match event {
             Event::WindowEvent {
@@ -336,7 +488,17 @@ fn handle_app_request(base_dir: &Path, request: Request<Vec<u8>>) -> Response<Co
         };
     }
 
-    // Everything else is a UI asset baked into the exe.
+    // Everything else is a UI asset. Prefer the live file from the source
+    // `ui/` folder when it exists — under `cargo run` that's the repo, so
+    // edits show up on the next launch with no rebuild. When it's absent
+    // (the deployed cartridge has no source tree), fall back to the copy
+    // baked into the exe by rust-embed.
+    let source_ui = Path::new(env!("CARGO_MANIFEST_DIR")).join("ui").join(path);
+    if let Ok(bytes) = fs::read(&source_ui) {
+        let mime = mime_type_for(Path::new(path), &bytes);
+        return ok_response(mime, Cow::Owned(bytes));
+    }
+
     match UiAssets::get(path) {
         Some(file) => {
             let bytes = file.data.into_owned();
@@ -350,6 +512,10 @@ fn handle_app_request(base_dir: &Path, request: Request<Vec<u8>>) -> Response<Co
 fn ok_response(mime: &'static str, body: Cow<'static, [u8]>) -> Response<Cow<'static, [u8]>> {
     Response::builder()
         .header(CONTENT_TYPE, mime)
+        // Never let WebView2 cache app:// responses in its data folder:
+        // otherwise it serves a stale index.html forever and edits (or
+        // swapped-in cover art) silently don't show up.
+        .header("Cache-Control", "no-store")
         .body(body)
         .unwrap()
 }

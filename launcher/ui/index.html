@@ -1,4 +1,11 @@
 <!DOCTYPE html>
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 da1sh1n
+  This file is part of GaCaSy, licensed under the GNU General Public License
+  v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+  or <https://www.gnu.org/licenses/> for details.
+-->
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
@@ -6,6 +13,12 @@
 <style>
   :root {
     color-scheme: dark;
+    /* Look-and-feel knobs. These fallbacks match the config.ini defaults; the
+       script below overrides them from window.__UI__ (fed by config.ini). */
+    --background-color: #1b1229;
+    --image-gap: 32px;
+    --corner-radius: 14px;
+    --shadow: 0 0 24px 0 rgba(0, 0, 0, 0.55);
   }
 
   html, body {
@@ -13,7 +26,7 @@
     padding: 0;
     width: 100%;
     height: 100%;
-    background: #000000;
+    background: var(--background-color);
     overflow: hidden;
   }
 
@@ -45,10 +58,12 @@
     color: #ffffff;
   }
 
+  /* A row of covers, centered in the window by the body. The gap is static;
+     each cover's pixel size is computed in JS to fit the window. */
   #grid {
-    display: flex;
-    gap: 32px;
-    padding: 0 40px;
+    display: inline-flex;
+    gap: var(--image-gap);
+    align-items: center;
   }
 
   .card {
@@ -56,7 +71,11 @@
     border: none;
     background: none;
     padding: 0;
-    width: 200px;
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
     cursor: pointer;
     font-family: inherit;
     transition: transform 0.15s ease;
@@ -75,18 +94,13 @@
 
   .card img {
     display: block;
-    width: 100%;
-    aspect-ratio: 600 / 900;
-    object-fit: cover;
-    border-radius: 14px;
+    border-radius: var(--corner-radius);
     background: #151515;
-    box-shadow: 0 10px 22px rgba(0, 0, 0, 0.55);
+    box-shadow: var(--shadow);
   }
 
   .card .caption {
-    display: block;
-    margin-top: 10px;
-    height: 20px;
+    max-width: 100%;
     line-height: 20px;
     color: #cfcfcf;
     font-size: 0.85rem;
@@ -102,11 +116,36 @@
   <div id="grid"></div>
 
   <script>
+    // Look-and-feel settings from config.ini (see Rust's init_script). Fall
+    // back to the same defaults as the CSS above when a value is absent.
+    const ui = window.__UI__ || {};
+
+    // Border of empty space between the window edge and the covers, and the
+    // static gap between covers. Both feed the layout math below and MUST
+    // match Rust's window sizing (border_gap / image_gap) and the CSS `gap`.
+    const PAD = Number.isFinite(ui.borderGap) ? ui.borderGap : 36;
+    const GAP = Number.isFinite(ui.imageGap) ? ui.imageGap : 32;
+
+    // Push the visual knobs into the CSS variables the stylesheet reads.
+    const rootStyle = document.documentElement.style;
+    if (ui.backgroundColor) rootStyle.setProperty("--background-color", ui.backgroundColor);
+    if (Number.isFinite(ui.imageGap)) rootStyle.setProperty("--image-gap", ui.imageGap + "px");
+    if (Number.isFinite(ui.cornerRadius)) rootStyle.setProperty("--corner-radius", ui.cornerRadius + "px");
+    // Symmetric shadow bounded by `size`: it's solid for `fade` px out from the
+    // cover edge (the box-shadow spread), then blurs to nothing over the rest,
+    // reaching exactly `size` and no further. blur = size - fade.
+    const shadowSize = Number.isFinite(ui.shadowSize) ? ui.shadowSize : 24;
+    const shadowFade = Number.isFinite(ui.shadowFade) ? ui.shadowFade : 0;
+    const shadowColor = ui.shadowColor || "rgba(0, 0, 0, 0.55)";
+    const spread = Math.max(0, Math.min(shadowFade, shadowSize));
+    const blur = Math.max(0, shadowSize - spread);
+    rootStyle.setProperty("--shadow", `0 0 ${blur}px ${spread}px ${shadowColor}`);
+
     const games = window.__GAMES__ || [];
     const showCaptions = window.__SHOW_CAPTIONS__ === true;
     const grid = document.getElementById("grid");
 
-    games.forEach((game, index) => {
+    const imgs = games.map((game, index) => {
       const card = document.createElement("button");
       card.className = "card";
       card.type = "button";
@@ -128,7 +167,34 @@
       }
 
       grid.appendChild(card);
+      return img;
     });
+
+    // Fit every cover to the window: each gets an equal share of the width,
+    // and is scaled DOWN to fit that share and the window height (whichever
+    // is tighter) at its native aspect ratio — never scaled up past native.
+    function layout() {
+      const n = Math.max(1, imgs.length);
+      const availW = window.innerWidth - 2 * PAD;
+      const availH = window.innerHeight - 2 * PAD;
+      const shareW = (availW - (n - 1) * GAP) / n;
+
+      imgs.forEach((img) => {
+        const nW = img.naturalWidth || 600;
+        const nH = img.naturalHeight || 900;
+        const scale = Math.min(1, shareW / nW, availH / nH);
+        img.style.width = Math.floor(nW * scale) + "px";
+        img.style.height = Math.floor(nH * scale) + "px";
+      });
+    }
+
+    const pending = imgs
+      .filter((img) => !img.complete)
+      .map((img) => new Promise((res) => { img.onload = img.onerror = res; }));
+
+    Promise.all(pending).then(layout);
+    layout(); // first pass in case images are already cached
+    window.addEventListener("resize", layout);
   </script>
 </body>
 </html>

@@ -1,2 +1,7 @@
-/target
-/output
+# Rust build output and deployed cartridge content, in any crate folder
+# (e.g. launcher/target, launcher/output).
+target/
+output/
+
+# WebView2's engine cache folder, wherever it lands in the tree.
+EBWebView/
