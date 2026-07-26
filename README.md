@@ -1,5 +1,18 @@
 # GaCaSy
 
+> ## ⚠️ Status: vibecoded
+>
+> **Every line of this project so far is vibecoded.** It was written fast, with an LLM,
+> to get the shape of the thing working — not carefully, not to any standard, and not
+> reviewed line by line.
+>
+> It runs, but treat it accordingly: assume bugs, assume rough edges, assume things that
+> only work because nothing has poked at them yet.
+>
+> I intend to go over the whole codebase myself later — read it end to end, clean it up,
+> refactor it into my own style, and check that it is actually correct as far as I know
+> how. Until that pass is done, this disclaimer stands.
+
 **Games. Cartridge. System.** — turn any storage device into a game cartridge that
 *just works* when you plug it in.
 
