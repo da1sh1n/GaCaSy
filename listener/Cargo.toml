@@ -1,0 +1,28 @@
+[package]
+name = "listener"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+
+[dependencies]
+# The only dependency. `.cartridge` and config.toml are both TOML, and both are
+# read key-by-key as a `toml::Table` rather than deserialized into a struct, so
+# there is no serde derive here — see src/config.rs for why.
+toml = "0.9.8"
+
+# Windows-only: the resident trigger is entirely Win32. Nothing here is pulled
+# in on a Linux build.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    # WNDCLASSW carries an HBRUSH, so the struct itself is gated on Gdi even
+    # though this window never paints.
+    "Win32_Graphics_Gdi",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",             # GetLogicalDrives / GetDriveTypeW
+    "Win32_System_Diagnostics_Debug",       # SetErrorMode
+    "Win32_System_LibraryLoader",           # GetModuleHandleW
+    "Win32_System_Threading",               # CreateMutexW
+    "Win32_System_WindowsProgramming",      # DRIVE_* constants
+    "Win32_UI_WindowsAndMessaging",
+] }

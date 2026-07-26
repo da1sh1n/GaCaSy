@@ -1,0 +1,28 @@
+# GaCaSy listener configuration.
+#
+# Lives beside listener.exe, along with the log it writes. The installer writes
+# this file and appends to `keys` each time a cartridge is paired;
+# hand-editing it is fine too.
+
+# Every cartridge key this PC trusts. A cartridge is launched when the `key` in
+# its `.cartridge` marker appears in this list (compared case-insensitively).
+# A list, so pairing a second cartridge appends instead of un-pairing the first.
+#
+# LEAVING THIS EMPTY TRUSTS EVERY CARTRIDGE. That is the unpaired default, so a
+# fresh install works as soon as a volume carries a valid `.cartridge` marker,
+# with no pairing step. It also means the marker is then the only thing between
+# a plugged-in disk and its named binary being started. Listing even one key
+# switches to matching that list and nothing else.
+keys = []
+
+# Where to append activity. Relative paths resolve against this folder, and the
+# default is `listener.log` right here beside the exe. An empty string turns
+# logging off. (If this folder is read-only — a listener installed into
+# Program Files — the log falls back to %LOCALAPPDATA%\GaCaSy\listener.log
+# rather than going silent.)
+# log_file = "listener.log"
+
+# How long (seconds) to ignore repeat arrivals for a drive letter already
+# handled. A flaky USB link can fire several add events for one connection;
+# without this each one launches another copy of the launcher.
+debounce_seconds = 5

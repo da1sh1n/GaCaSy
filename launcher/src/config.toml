@@ -1,10 +1,17 @@
 # Cartridge Launcher config (TOML).
-# This file is only written once (if missing); your edits are never
-# overwritten by cargo run.
 #
-# Window size is a fraction of your display, set in src/main.rs
-# (WINDOW_WIDTH_FRACTION / WINDOW_HEIGHT_FRACTION). The covers scale to fit
-# it automatically.
+# In the repo, launcher/src/config.toml is the master: every `cargo run`
+# copies it over output/config.toml, so edit it in src/ — changes made to the
+# copy in output/ are overwritten on the next run.
+#
+# On a real cartridge there is no src/, and this file is written once if
+# missing and never touched again: whoever owns the cartridge owns its config.
+#
+# The window wraps the covers: each cover aims for a fraction of your display
+# and the window is sized around the row of them, bounded by two caps. All
+# three fractions live in src/constants.rs (IMAGE_WIDTH_FRACTION,
+# MAX_WIDTH_FRACTION, MAX_HEIGHT_FRACTION), together with every other number
+# this file doesn't expose. The covers scale to fit automatically.
 
 # Show the game's name under its cover card. Off by default since cover
 # art usually already has the title on it.
@@ -33,6 +40,45 @@ background_color = "#1b1229"
 #                  smoothly to nothing by shadow_size (0 = fades the whole way;
 #                  must be <= shadow_size).
 #   shadow_color — its color; use the rgba alpha to set how dark it is.
-shadow_size = 24
-shadow_fade = 0
-shadow_color = "rgba(0, 0, 0, 0.55)"
+shadow_size = 20
+shadow_fade = 2
+shadow_color = "rgba(220, 139, 101, 0.8)"
+
+# ── Launching ──────────────────────────────────────────────────────────────
+# What the player sees when a game is chosen, and when one can't start. Full
+# details of any failure are written to logs/launcher.log, and each game's own
+# console output to logs/<game>/out.log and err.log.
+
+# Screen darkening while the chosen game starts up. It covers everything,
+# the centred cover included. Use the rgba alpha to set how dark it gets.
+overlay_color = "rgba(0, 0, 0, 0.45)"
+
+# The ring that spins in the middle of the screen while waiting, and the line
+# of text under it naming what is starting. Both are plain CSS colors, so the
+# text's alpha is how faint it is.
+loading_ring_color = "#ffffff"
+loading_text_color = "rgba(255, 255, 255, 0.6)"
+
+# How many pieces the ring is cut into. The cuts are half as wide as the ring
+# is thick and go straight across it, so each piece has two flat ends.
+loading_ring_segments = 12
+
+# How fast the ring turns, in full turns per second. Anything below 0.05 is
+# raised to 0.05, so the ring can be as slow as you like but never stopped.
+loading_ring_speed = 0.2
+
+# Pixels between the bottom of the ring and the line of text under it.
+loading_text_gap = 12
+
+# A game that was chosen but failed to start: its cover keeps this border and
+# a short message appears under it. It stays clickable, so choosing it again
+# retries.
+error_border_color = "#e0b13a"
+error_border_width = 3
+error_text_color = "#e0b13a"
+
+# A game whose exe isn't on the cartridge at all. Its cover is dimmed to
+# missing_dim (1 = untouched, 0 = black) and marked with a sign in
+# missing_sign_color; it can't be chosen.
+missing_sign_color = "#d13a3a"
+missing_dim = 0.45

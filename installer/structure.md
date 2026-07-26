@@ -115,7 +115,7 @@ The fiddliest part of job 1. For each chosen game folder:
 
 One image per game, chosen by the user, copied to `images/<slug>.png`. The launcher's native
 cover size is **600×900 (2:3)** — `COVER_NATIVE_WIDTH` / `COVER_NATIVE_HEIGHT` in
-[`../launcher/src/main.rs`](../launcher/src/main.rs). v1 copies the file as-is and **warns**
+[`../launcher/src/constants.rs`](../launcher/src/constants.rs). v1 copies the file as-is and **warns**
 on a non-2:3 ratio rather than resizing it, which keeps the exe small and dependency-free.
 
 ### Catalog writing
@@ -133,8 +133,17 @@ unrelated things:
 
 1. Copy the embedded listener binary into place — `C:\Program Files\GaCaSy\listener.exe` on
    Windows.
+   > The listener keeps its exe, config and log in one folder, and `Program Files` is the
+   > one location where that can't hold: the user it runs as can't write there, so its log
+   > falls back to `%LOCALAPPDATA%\GaCaSy\listener.log`. If the installer would rather keep
+   > all three together, `%LOCALAPPDATA%\Programs\GaCaSy\` is writable and needs no
+   > elevation at all — which would also remove the only reason job 2 requires admin.
 2. Write its `config.toml` beside it. If one already exists, **append** the new key to its
-   `keys` list rather than overwriting the file — see [Keys](#keys).
+   `keys` list rather than overwriting the file — see [Keys](#keys). Note that an *empty*
+   `keys` list means the listener trusts **every** cartridge
+   ([why](../listener/structure.md#an-empty-keys-list-trusts-everything)), so writing the key
+   is what narrows the PC down to the cartridges the user actually made — the installer is
+   tightening a default that starts open, not opening one that starts shut.
 3. **Make it run — per OS:**
    - **Windows (v1)** — the listener is a **resident** process, so register it to start at
      login: an `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` entry pointing at the

@@ -10,16 +10,17 @@ GaCaSy is made of three apps:
 - **Listener** — lives *on your PC*. When you plug in a GaCaSy cartridge, it recognizes
   it and starts that cartridge's launcher automatically — like slotting a cartridge into
   a console. On Windows that's a small background app; on Linux nothing runs at all until
-  you plug something in. *(Coming soon; not built yet.)*
+  you plug something in. *(Windows build works; Linux not started.)*
 - **Installer** — the one file you download. It turns blank media into a cartridge,
   installs the listener, and edits cartridges you already made. *(Coming soon; not built
   yet.)*
 
-Today the **launcher works**. The **listener and installer are upcoming**, so for now you
-copy files onto the cartridge and start the launcher yourself.
+Today the **launcher works** and so does the **Windows listener** — but with no installer
+yet, you set both up by hand: copy files onto the cartridge, write its `.cartridge` marker,
+and start the listener yourself.
 
 > Developers: each app documents itself — [launcher/structure.md](launcher/structure.md)
-> (cartridge side), [listener/structure.md](listener/structure.md) (PC-side spec), and
+> (cartridge side), [listener/structure.md](listener/structure.md) (PC side), and
 > [installer/structure.md](installer/structure.md) (setup-side spec).
 
 ---
@@ -30,7 +31,8 @@ copy files onto the cartridge and start the launcher yourself.
 GaCaSy/
   launcher/          The cartridge-side app (Rust + webview)
     src/             App code, the UI, and the seed data files
-      main.rs          The Rust shell
+      main.rs          Entry point; one file per job beside it (ui, launch,
+                       config, catalog, assets, window, log, constants, …)
       index.html       The UI (baked into the exe at build time)
       catalog.json     Seed game list — name, exe path, cover image
       config.toml      Seed look & feel
@@ -42,7 +44,21 @@ GaCaSy/
       images/          cover art, 600x900          (you drop these in)
       catalog.json     game list  (seeded from src/)
       config.toml      settings   (seeded from src/)
-  listener/          The PC-side app (coming soon)
+  listener/          The PC-side app (Windows built, Linux not started)
+    src/
+      main.rs        Entry point and --check handling
+      volume.rs      The shared core: marker, trust check, launch
+      marker.rs      Reading a cartridge's .cartridge file
+      config.rs      Reading the listener's own config.toml
+      log.rs         The activity log
+      config.toml    Seed config, embedded in the exe
+      trigger/       The only per-OS part
+        windows.rs   Resident: hidden window + WM_DEVICECHANGE
+        linux.rs     One-shot udev handoff — placeholder, not built
+    output/          The deployed listener — what you actually run
+      listener.exe   The program
+      config.toml    Trusted keys  (seeded from src/; empty = trust all)
+      listener.log   What it did, and why it ignored what it ignored
     README.md        What the listener is, in short
     structure.md     Spec for the PC-side listener — including the two
                      execution models (resident on Windows, one-shot on Linux)
@@ -83,12 +99,39 @@ GaCaSy/
 3. **Ship it** — copy the `output/` folder onto the cartridge (any storage device: NVMe,
    SSD, HDD, USB). `launcher.exe` and its content travel together.
 
-### The listener (PC) — *coming soon*
+### The listener (PC) — *Windows works, Linux not started*
 
 Auto-starts a cartridge's launcher when you plug it in. Windows and Linux, built from one
 codebase but working quite differently: on Windows it's a small app running quietly in the
-background, on Linux it isn't running at all until the system wakes it on connect. Not
-available yet; see [listener/structure.md](listener/structure.md) for the plan.
+background, on Linux it isn't running at all until the system wakes it on connect.
+
+Until the installer ships, setting it up is manual:
+
+1. `cd listener && cargo run --release -- --check .` — builds it, fills in
+   `listener/output/` with `listener.exe` and a `config.toml` (the same way the launcher's
+   `output/` works), and exits.
+2. Put a `.cartridge` file at the root of the cartridge:
+
+   ```toml
+   version = 1
+   key = "pick-any-string"
+   launcher = "launcher.exe"
+   ```
+
+3. Run `output\listener.exe`. It stays in the background — no window, no tray icon — and
+   starts the launcher when you plug the cartridge in. `output\listener.log`, right beside
+   it, says what it did.
+
+Out of the box the listener trusts **every** cartridge, so step 2 is all the pairing there
+is. To restrict it to your own, list their keys in `output\config.toml`:
+
+```toml
+keys = ["pick-any-string"]
+```
+
+`listener.exe --check E:\` answers "would this cartridge launch?" without plugging anything
+in. See [listener/README.md](listener/README.md) and
+[listener/structure.md](listener/structure.md) for the rest.
 
 ### The installer — *coming soon*
 
@@ -99,8 +142,8 @@ and sets up the listener for you. See [installer/structure.md](installer/structu
 
 ## Use
 
-1. Plug in the cartridge (once the listener ships, this is all you do).
-2. Run `launcher.exe` (until then, start it manually).
+1. Plug in the cartridge. With the Windows listener running, that is all you do.
+2. Otherwise run `launcher.exe` yourself.
 3. The launcher opens full of cover art:
    - **Click a cover** to launch that game.
    - **Click the close button** (top-right) to exit.
