@@ -13,7 +13,7 @@
 //! ("Execution models").
 //!
 //! Both end at the same place: [`crate::volume::handle_volume`]. Nothing about
-//! markers, keys or launching lives in this folder.
+//! signatures, versions or launching lives in this folder.
 
 #[cfg(windows)]
 mod windows;

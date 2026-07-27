@@ -1,0 +1,11 @@
+[package]
+name = "sigblock"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+
+# No dependencies, and there should never be one. This crate is linked into the
+# listener, whose whole pitch is 1.2 MB and 0 ms idle, and into build scripts
+# that run before anything else exists. It only knows how to find sixteen bytes
+# at the end of a file.
+[dependencies]

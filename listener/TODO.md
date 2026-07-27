@@ -28,8 +28,8 @@ platform.
       (no hardcoded `launcher.exe`), refusing any path that escapes the volume.
 - [x] Log ignored volumes with the reason (no marker / unknown key / bad TOML / bad version /
       launcher missing or outside the volume) — [`src/log.rs`](src/log.rs). The log lives
-      beside the exe and its config, falling back to `%LOCALAPPDATA%` only when that folder
-      is read-only.
+      beside the exe and its config — `%LOCALAPPDATA%\GaCaSy\` for an installed listener —
+      falling back to that same folder if the exe was dropped somewhere read-only.
 - [x] Behave correctly when started by hand, plus `--check <path>` to run the core against one
       volume and exit. Registering the login entry (Windows) and installing the udev rule
       (Linux) remain the **installer's** job.

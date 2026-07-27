@@ -7,7 +7,8 @@ documented in [`../launcher/structure.md`](../launcher/structure.md), the PC-sid
 [`../listener/structure.md`](../listener/structure.md); the user-facing overview is in
 [`../README.md`](../README.md).
 
-> **This side does not exist yet.** Treat this doc as a *spec to build by*.
+> **Built.** This was a spec; it is now a description. Where the built thing differs
+> from the original spec — the elevation model, chiefly — the section says so and why.
 
 ## Purpose
 
@@ -18,9 +19,8 @@ side-by-side files.**
 
 ## Shape
 
-- **Its own crate**, `installer/`, sibling to `launcher/` and `listener/`. A root
-  `Cargo.toml` workspace should tie the three together — none exists today
-  (`launcher/Cargo.toml` is a standalone crate).
+- **Its own crate**, `installer/`, sibling to `launcher/` and `listener/`, tied together by
+  the root `Cargo.toml` workspace.
 - **`eframe` / `egui`** for the UI: pure Rust, statically linked, no runtime dependency.
   This is the reason it is not a webview like the launcher — a WebView2-based installer that
   finds the runtime missing has no way to bootstrap itself with no internet.
@@ -28,7 +28,30 @@ side-by-side files.**
 - **Windows for v1.** The Linux equivalents of every Windows-shaped step (`Program Files`,
   registry autostart, `launcher.exe`) are noted under [Future](#future) so the design
   doesn't paint itself into a corner.
-- **Requires elevation** — a UAC manifest, for the `Program Files` write in job 2.
+- **Asks for no elevation** — see [Elevation](#elevation), which is where this build
+  departs from the original spec.
+
+### Source layout
+
+```text
+installer/
+  build.rs        finds the payload, stages it in OUT_DIR, fails loudly if it's missing
+  src/
+    main.rs       entry point and the module map
+    app.rs        wizard state, and the create-vs-edit routing rule
+    ui/           the screens; ui/mod.rs holds the shell and the only footer
+    work.rs       the worker thread, and how the UI hears from it
+    payload.rs    the embedded launcher, listener and seed files
+    volume.rs     which drives can be cartridges, and which already are
+    detect.rs     finding the game's exe inside a folder, and measuring it
+    image.rs      cover dimensions, for the 2:3 warning
+    catalog.rs    catalog.json — the file the launcher reads
+    marker.rs     .cartridge — the file the listener reads
+    cartridge.rs  the write itself: copy, catalog, config, launcher, marker
+    listener.rs   job 2 — install folder, key merge, Run entry, uninstall
+    copy.rs       the cancellable, measured file copy underneath it all
+    key.rs        generating and validating cartridge keys
+```
 
 ### Embedded payload
 
@@ -37,14 +60,38 @@ The installer carries its outputs inside itself, via `include_bytes!` / `rust-em
 ```text
 installer.exe
   ├─ launcher.exe      ← written onto the cartridge
-  ├─ listener.exe      ← written into Program Files
-  ├─ config.toml       ← seed, from launcher/src/config.toml
-  └─ catalog.json      ← seed, from launcher/src/catalog.json
+  ├─ listener.exe      ← written into the listener's install folder
+  ├─ config.toml       ← cartridge seed, from launcher/src/config.toml
+  ├─ catalog.json      ← cartridge seed, from launcher/src/catalog.json
+  └─ config.toml       ← listener seed, from listener/src/config.toml
 ```
 
+The listener's seed config is carried as well as the cartridge's, and it is not in the
+original list above by accident: pairing a PC *edits* that file's `keys` list, so starting
+from the commented seed the listener ships with is what puts the "an empty list trusts
+everything" paragraph in front of whoever opens it later.
+
 Build-ordering consequence: **launcher and listener must be built `--release` before the
-installer.** The build should fail loudly with a clear message when a payload artifact is
-missing, rather than producing an installer that ships nothing.
+installer**, which `build.rs` enforces — a missing artifact fails the build with the command
+to run, rather than producing an installer that ships nothing.
+
+The workspace's `default-members` leaves the installer out for the same reason, so the two
+steps happen in the right order by default:
+
+```sh
+cargo build --release               # launcher + listener
+cargo build --release -p installer  # embeds what that produced
+```
+
+In a single all-crates invocation nothing orders the installer's build script after the
+launcher's link step — there is no dependency edge between them, and binary-artifact
+dependencies are still unstable — so it is a race that usually goes your way. Two commands
+is cheaper than a flaky one.
+
+`GACASY_PAYLOAD_OPTIONAL=1` builds an installer with empty binary slots, for working on the
+UI without a release build in front of every iteration. That build is not shippable and says
+so: `payload::defect()` puts a red line across the top of every screen and every write
+refuses before it starts.
 
 ## Why not part of the listener
 
@@ -54,6 +101,51 @@ whereas bundling would push the whole wizard UI into a process that has to stay 
 cross-platform: one that runs at every login on Windows, and that udev fires and kills per
 connection on Linux, where `Program Files` means nothing and a wizard has nobody to show
 itself to.
+
+## Elevation
+
+**The spec said "requires elevation — a UAC manifest, for the `Program Files` write in job
+2". The built installer asks for none, and has no code that could.** The reasoning is in the
+spec's own blockquote under [job 2](#job-2--install-the-listener): the listener keeps its exe,
+config and log in one folder, `Program Files` is the one place that can't hold, and a folder
+under `%LOCALAPPDATA%` is writable and needs no elevation — "which would also remove the only
+reason job 2 requires admin".
+
+That is now the *only* location. See [Where the listener lives](#where-the-listener-lives).
+What follows from having no elevated path at all:
+
+- The listener's three files stay together, always writable, always in the folder its own
+  documentation points at.
+- **Job 1 stops demanding admin.** Writing a cartridge to a drive the user can already write
+  to never needed it, and a blanket `requireAdministrator` manifest would have put a UAC
+  prompt in front of the common case to serve the rare one.
+- No process-token check, no `ShellExecuteW "runas"`, no elevated relaunch, no second copy of
+  the installer racing the first over one registry value. The
+  `Win32_Security` / `Win32_UI_Shell` windows-sys features are gone with them.
+
+### Where the listener lives
+
+`%LOCALAPPDATA%\GaCaSy\` — `listener.exe`, its `config.toml` and `listener.log`, together.
+
+It is the same path `config::fallback_log_path` in
+[`../listener/src/config.rs`](../listener/src/config.rs) already named as the log's home, so
+the install folder and the log folder are now one folder rather than two that a paragraph had
+to reconcile. An installed listener never reaches that fallback at all: the primary path and
+the fallback resolve to the same file.
+
+Program Files bought a shared *binary* and nothing else — autostart is `HKCU\…\Run`, per user,
+wherever the exe sits, so every account that wants the listener registers its own regardless.
+It is not offered.
+
+**Folders earlier builds used** — `%LOCALAPPDATA%\Programs\GaCaSy\` and
+`%ProgramFiles%\GaCaSy\` — are still *looked at*, never written. An install found in one is
+listed on the listener screen and folded in when you install: its trusted keys are carried
+over first, then it is stopped, un-registered and deleted. Carrying the keys is the part that
+matters; removing the folder without them would silently un-pair every cartridge that PC
+knew, which is exactly what the `keys`-is-a-list design exists to prevent. A leftover that
+refuses to delete (a Program Files copy, with no elevation to remove it) is reported and
+stepped over — the new listener works either way, and the stale copy no longer holds the
+login entry.
 
 ## Flow
 
@@ -69,16 +161,72 @@ Installing the listener (job 2) is independent of both and can be run on its own
 
 ## Job 1 — Create a cartridge
 
-1. **Pick the target volume.** Enumerate mounted volumes (same "any mounted storage volume"
-   rule the listener uses — NVMe / SSD / HDD / USB alike, never a specific USB id). A volume
-   *with* a `.cartridge` at its root routes to [job 3](#job-3--edit-an-existing-cartridge);
-   one *without* lands here.
+1. **Pick the target volume — external drives only.** See
+   [Which drives are offered](#which-drives-are-offered). A volume that already carries a
+   launcher routes to [job 3](#job-3--edit-an-existing-cartridge); one without lands here.
 2. **Choose the key.** Required before installation can start — see [Keys](#keys).
 3. **Add games.** The user picks one or more game folders.
 4. **Per game:** auto-find the executable (below), then pick a cover image.
 5. **Review**, check free space, then copy — with a progress bar on a worker thread. Game
    folders run to many GB; the UI must stay responsive and the copy must be cancellable.
 6. **Write the cartridge layout.**
+
+### Which drives are offered
+
+**External storage only.** The drive Windows is installed on is refused outright, and so is
+every internal disk. A cartridge is a thing you unplug and carry to another PC, and making one
+means copying many gigabytes onto a volume and — in edit mode — deleting folders from it.
+Pointing that at `C:\` is not a supported choice that happens to be unwise; it is not offered.
+
+This is deliberately **stricter than the listener**, which starts a correctly signed launcher
+from any volume it sees. The asymmetry is the right way round: the listener decides whether to
+*run* something already on a disk, this decides where to *write* gigabytes. A cartridge
+someone hand-assembles on an internal disk still works — the installer just won't make one
+there.
+
+#### What counts as external
+
+Not `DRIVE_REMOVABLE`, which is the tempting answer and the wrong one. A USB SSD in an
+enclosure — precisely the drive a game cartridge wants to be — reports as `DRIVE_FIXED`,
+exactly like the disk Windows is installed on. Filtering on it would reject the best
+candidates and admit none of the ones it was meant to catch.
+
+So the question is asked of the hardware: `IOCTL_STORAGE_QUERY_PROPERTY` for the underlying
+disk's **bus type**. USB, FireWire, SD and MMC are external; SATA, NVMe, SAS, RAID and the
+rest are not. The handle is opened with **zero** access rights, which is why none of this
+needs administrator — asking for `GENERIC_READ` would put a UAC wall in front of the drive
+picker.
+
+Two consequences worth knowing:
+
+- A **Thunderbolt/PCIe enclosure** presents its disk as `BusTypeNvme`, indistinguishable from
+  an internal one, so it is treated as internal and refused. That is the conservative
+  direction to be wrong in: the cost is a drive you can't pick, not a system disk you can.
+  USB-attached NVMe enclosures — the common kind — report `BusTypeUsb` and are fine.
+- **Windows-To-Go** on a USB stick passes the bus test, so the system-drive check runs first,
+  separately, and wins.
+
+The system-drive check compares drive letters against `%SystemRoot%`, `%windir%` and
+`%SystemDrive%`, and **any** match vetoes. Not hardcoded to `C:` — Windows on another letter
+is rare but real, and a hardcoded `C:` would be wrong in the dangerous direction there. Three
+variables rather than one because each can be missing or tampered with, and requiring only one
+to match means no single absent variable can quietly switch the veto off.
+
+If the bus query fails outright, the fallback is Windows' own coarse answer taken
+conservatively: only a drive Windows itself calls *removable* gets through, so an
+unidentifiable fixed disk is refused rather than guessed at.
+
+Refused drives are still **listed**, greyed out, under a "Not usable" heading with the reason
+beside them. A filter that silently shortens a list is indistinguishable from a bug to the
+person looking at it, and "why isn't my D: drive here?" is a question the screen should answer
+by itself. Network shares, optical drives and RAM disks are the exception — they are dropped
+entirely, since there is nothing useful to say about them and probing a stale network mount
+can block for a long time.
+
+The check runs at **three** points, because the list can go stale under a click — an external
+drive unplugged, its letter picked up by something internal: the picker won't offer it,
+`choose_volume` refuses it, and `plan()` refuses it again, which is what the Review screen
+shows and what the Write button consumes.
 
 ### Resulting layout
 
@@ -106,17 +254,39 @@ The fiddliest part of job 1. For each chosen game folder:
   `*crashhandler*` (e.g. `UnityCrashHandler64.exe`), and anything under `redist/`,
   `_CommonRedist/` or `Engine/Binaries/ThirdParty/`.
 - **Score** the survivors: shallower path wins, a name matching the folder name wins, larger
-  file wins.
+  file wins — in that order of weight. A name match is worth several folder levels; size is
+  capped so it can only ever break a tie.
 - One clear winner → preselect it. Ambiguous, or nothing left → the user **must** pick
-  manually.
-- The user can **always** override the pick, including when detection succeeded.
+  manually. "Clear" means the top score beats the runner-up by at least one depth level;
+  a coin flip is never presented as a decision.
+- The user can **always** override the pick, including when detection succeeded. A
+  hand-picked exe must be *inside* the game folder, since that folder is all the copy moves.
+
+Two bounds keep a pathological tree from hanging the scan: nothing deeper than eight levels
+is looked at, and files under 16 KB are treated as stubs rather than game binaries. Symlinks
+are neither followed nor counted, which also keeps the byte total honest — the copy doesn't
+follow them either.
+
+The same walk **measures the folder**. A game install is walked once, not twice: the byte
+total it produces is what the free-space check and the progress bar both use.
 
 ### Cover images
 
-One image per game, chosen by the user, copied to `images/<slug>.png`. The launcher's native
-cover size is **600×900 (2:3)** — `COVER_NATIVE_WIDTH` / `COVER_NATIVE_HEIGHT` in
-[`../launcher/src/constants.rs`](../launcher/src/constants.rs). v1 copies the file as-is and **warns**
-on a non-2:3 ratio rather than resizing it, which keeps the exe small and dependency-free.
+One image per game, chosen by the user, copied to `images/<slug>.<ext>`. The extension is
+kept rather than forced to `.png`: the launcher hands the path to the webview, which goes by
+content and not by name, and renaming a `.webp` to `.png` only makes the cartridge harder to
+read later.
+
+The launcher's native cover size is **600×900 (2:3)** — `COVER_NATIVE_WIDTH` /
+`COVER_NATIVE_HEIGHT` in [`../launcher/src/constants.rs`](../launcher/src/constants.rs).
+v1 copies the file as-is and **warns** on a non-2:3 ratio rather than resizing it, which
+keeps the exe small and dependency-free.
+
+Dimensions come from a header parser, not an image library — PNG, WebP (including the `VP8X`
+form an *animated* WebP uses), JPEG and GIF. The format is decided by the bytes and the
+extension is never consulted, because cover art is routinely an animated WebP saved as
+`.png`. Anything unrecognised produces no warning at all, rather than a rule that would
+reject formats the webview renders perfectly well.
 
 ### Catalog writing
 
@@ -131,33 +301,49 @@ different process lifetimes (see
 [Execution models](../listener/structure.md#execution-models)), so "make it run" means two
 unrelated things:
 
-1. Copy the embedded listener binary into place — `C:\Program Files\GaCaSy\listener.exe` on
-   Windows.
-   > The listener keeps its exe, config and log in one folder, and `Program Files` is the
-   > one location where that can't hold: the user it runs as can't write there, so its log
-   > falls back to `%LOCALAPPDATA%\GaCaSy\listener.log`. If the installer would rather keep
-   > all three together, `%LOCALAPPDATA%\Programs\GaCaSy\` is writable and needs no
-   > elevation at all — which would also remove the only reason job 2 requires admin.
+1. Copy the embedded listener binary into place: **`%LOCALAPPDATA%\GaCaSy\listener.exe`**,
+   the only location, alongside the config and log it writes. There is no choice to make and
+   no elevation — see [Elevation](#elevation).
+   > The original spec said `C:\Program Files\GaCaSy\` and named the problem with it in the
+   > same breath: the listener keeps its exe, config and log in one folder, and Program Files
+   > is the one location where that can't hold — the user it runs as can't write there, so
+   > its log falls back to `%LOCALAPPDATA%\GaCaSy\listener.log`. Rather than keep a location
+   > that splits the three files up, the install *is* that folder.
+
+   A listener that is already running holds its own exe open, so an update or repair stops
+   it first — matched on the **full image path**, never on the name `listener.exe`. It has
+   no window to close and no IPC to ask through, and nothing to lose by being stopped: its
+   only state is its log.
 2. Write its `config.toml` beside it. If one already exists, **append** the new key to its
-   `keys` list rather than overwriting the file — see [Keys](#keys). Note that an *empty*
+   `keys` list rather than overwriting the file — see [Keys](#keys). The append is a
+   *textual* edit of the `keys = […]` value, not a TOML round-trip: serializing the table
+   back out would be shorter and would throw away every comment in the file, including the
+   paragraph explaining that an empty list trusts everything. Note that an *empty*
    `keys` list means the listener trusts **every** cartridge
    ([why](../listener/structure.md#an-empty-keys-list-trusts-everything)), so writing the key
    is what narrows the PC down to the cartridges the user actually made — the installer is
    tightening a default that starts open, not opening one that starts shut.
 3. **Make it run — per OS:**
    - **Windows (v1)** — the listener is a **resident** process, so register it to start at
-     login: an `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` entry pointing at the
-     Program Files exe. Per-user, and the registry write itself needs no admin (the Program
-     Files copy in step 1 still does). Alternatives worth keeping in mind: `HKLM\…\Run` for
-     all users, or a Task Scheduler logon trigger if it ever needs to start elevated.
+     login: an `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` entry named
+     `GaCaSy Listener`, holding the **quoted** exe path — `C:\Users\First Last\AppData\…`
+     has a space in it whenever the account name does. Per-user, like the install folder it
+     points into. Alternatives worth keeping in mind: `HKLM\…\Run` for all users, or a Task
+     Scheduler logon trigger if it ever needs to start elevated.
+     > It is also started **immediately**, not just registered. Without that, plugging a
+     > cartridge in does nothing until the next login, which reads as the install having
+     > failed.
    - **Linux (future)** — there is **nothing to autostart**. The listener is one-shot and udev
      starts it per event, so the installer's whole job is dropping
      `/etc/udev/rules.d/99-gacasy.rules` and running `udevadm control --reload`. Note the
      elevation shape inverts: this needs **root** for a system-wide rules directory, where
-     Windows needed admin only for the binary copy and not for the per-user `Run` key.
-4. **Repair / uninstall:** detect an existing install and offer to replace or remove it.
-   Removing means deleting the folder *and* undoing step 3 — the `Run` entry on Windows, or
-   the rule file plus a `udevadm control --reload` on Linux.
+     Windows needs no elevation at all.
+4. **Repair / uninstall:** detect an existing install and offer to replace or remove it,
+   including one left in a folder an earlier build used. Removing means deleting the folder
+   *and* undoing step 3 — the `Run` entry on Windows, or the rule file plus a
+   `udevadm control --reload` on Linux. The `Run` entry is only cleared when it points at
+   *that* folder's exe, so cleaning up a stray copy can't retire the working install's login
+   entry as a side effect.
 
 ## Job 3 — Edit an existing cartridge
 
@@ -191,13 +377,43 @@ installation starts**, either typing their own or accepting a generated random o
 chars). Reusing one key across several cartridges is fine and expected — that is what makes
 them all work against a single listener install.
 
-## Open questions
+## Settled questions
 
-- What happens when the **same game folder is added twice** — reject, rename, or overwrite?
-- **Free-space check** before the copy (fast, can be wrong about compression/sparse files) or
-  handle the failure mid-copy (accurate, but leaves a half-written cartridge to roll back)?
-- **Formatting or erasing media** is out of scope for v1 — the installer writes to a volume,
-  it never repartitions one.
+### Adding the same game twice — **rejected**, with the existing game named
+
+The two alternatives are both worse. *Overwrite* destroys an install that may be many
+gigabytes and may be the user's only copy, over an ambiguous click. *Rename* produces
+`games/foo` and `games/foo_2` — two entries the user cannot tell apart on the cartridge later,
+and no way back to which was which. Refusing costs one click: remove the existing one, or
+rename the folder being added.
+
+The check runs twice over, because there are two ways to collide: the same source folder
+added twice in one session, and a folder whose slug matches a game already on the cartridge.
+A *third* collision — two differently-named games that squash to the same slug (`Game: II`
+and `Game II`) — is not a user mistake and is silently suffixed instead.
+
+### Free space — **precheck, and handle the failure anyway**
+
+The precheck is cheap and catches the honest case before a twenty-minute copy starts. It
+demands the measured bytes plus the launcher plus **256 MB of headroom**, because the
+measurement is a sum of file sizes and what a filesystem consumes is that plus per-file slack
+and cluster rounding — and because filling a cartridge to the last byte leaves the launcher no
+room for its log and WebView2 cache.
+
+It is a precheck, not a guarantee, so the copy still handles running out mid-way. That path
+is the same one cancel takes: everything **this run** created is removed, content that was
+already on the cartridge is untouched, and `catalog.json` — written last — still describes
+the cartridge as it was. A failure leaves a cartridge that is *older* than intended, never
+one listing games it doesn't have.
+
+Space that removals will release is not subtracted from the estimate. Removals happen first,
+so a tight plan simply proceeds with the room they freed, and one that passes without them
+was never in doubt.
+
+### Out of scope for v1
+
+**Formatting or erasing media.** The installer writes files to a volume; it never
+repartitions one.
 
 ## Future
 
@@ -213,18 +429,25 @@ them all work against a single listener install.
 
 ## Status / roadmap
 
-- [ ] Root `Cargo.toml` workspace tying `launcher` + `listener` + `installer`.
-- [ ] `installer` crate scaffold: `eframe`/`egui`, UAC manifest, `windows_subsystem`.
-- [ ] Embedded payload + build-time check that every artifact is present.
-- [ ] Volume enumeration and create-vs-edit routing on `.cartridge`.
-- [ ] Key screen: generate or type, validated, required before install.
-- [ ] Game folder picker, executable auto-detection, manual override.
-- [ ] Per-game cover image picker with the 2:3 warning.
-- [ ] Cartridge write: threaded `games/` copy with progress + cancel, images, catalog,
+- [x] Root `Cargo.toml` workspace tying `launcher` + `listener` + `installer`.
+- [x] `installer` crate scaffold: `eframe`/`egui`, `windows_subsystem`. **No UAC manifest** —
+      see [Elevation](#elevation).
+- [x] Embedded payload + build-time check that every artifact is present.
+- [x] Volume enumeration, **external drives only** (bus type, plus an unconditional
+      system-drive veto), and create-vs-edit routing.
+- [x] Key screen: generate or type, validated, required before install.
+- [x] Game folder picker, executable auto-detection, manual override.
+- [x] Per-game cover image picker with the 2:3 warning.
+- [x] Cartridge write: threaded `games/` copy with progress + cancel, images, catalog,
       `config.toml` (no key), `.cartridge` marker.
-- [ ] Listener install: Program Files copy, key appended to the config's `keys` list, and
-      per-OS activation — a `Run` entry on Windows, a udev rule plus reload on Linux.
-- [ ] Edit mode: add games, remove games, change key.
-- [ ] Free-space precheck and failure/rollback handling.
-- [ ] Uninstall / repair path.
+- [x] Listener install into `%LOCALAPPDATA%\GaCaSy` — the only location — key appended to the
+      config's `keys` list, and a `Run` entry on Windows. Installs left by an earlier build
+      elsewhere are carried over and cleared out.
+- [x] Edit mode: add games, remove games, change key.
+- [x] Free-space precheck and failure/rollback handling.
+- [x] Uninstall / repair path.
+- [ ] **Not yet exercised end to end on real media.** Every module has unit tests and the
+      whole wizard builds and runs, but no cartridge has been written to a physical drive and
+      then booted by a listener. That is the next thing to do, and it is the one thing the
+      tests cannot stand in for.
 - [ ] Future: Linux target.

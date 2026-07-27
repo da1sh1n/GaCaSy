@@ -48,11 +48,14 @@ output/
   listener.log   <- what it did, and why it ignored what it ignored
 ```
 
-That folder is simply **wherever the exe is** — `output/`, `C:\Program Files\GaCaSy\`, or
-anywhere it was dropped. The single exception is a `cargo run` build, whose exe lives under
-`target/`: that resolves to the repo's `output/` instead, and refreshes
-`output/listener.exe` so the shippable copy tracks the source. `config.toml` is never
-overwritten once present, so an edited key list survives every build.
+That folder is simply **wherever the exe is**. Installed, that is
+**`%LOCALAPPDATA%\GaCaSy\`** and nowhere else — the installer has one location and no
+elevated path to any other, chosen precisely so these three files are always together and
+always writable ([`../installer/structure.md`](../installer/structure.md#elevation)). It can
+also be `output/`, or anywhere the exe was dropped by hand. The single exception is a
+`cargo run` build, whose exe lives under `target/`: that resolves to the repo's `output/`
+instead, and refreshes `output/listener.exe` so the shippable copy tracks the source.
+`config.toml` is never overwritten once present, so an edited key list survives every build.
 
 The refresh is done by the exe that is *running*, so `cargo build --release` deploys
 nothing — it never runs anything. `cargo run --release -- --check .` deploys the release
@@ -60,7 +63,7 @@ build and exits.
 
 The "am I a dev build?" test is **"is the exe inside this crate's `target/`?"**, deliberately
 not the launcher's "is my parent folder named `output`?". The latter misreads an installed
-`Program Files\GaCaSy\listener.exe` as a dev build, because that parent isn't named `output`
+`…\AppData\Local\GaCaSy\listener.exe` as a dev build, because that parent isn't named `output`
 either — the bug noted against `running_deployed()` in
 [`../launcher/src/content.rs`](../launcher/src/content.rs).
 
@@ -282,10 +285,11 @@ debounce_seconds = 5
   by hand often enough that `3F9A` failing to match `3f9a` would only ever be a support
   burden — it is a recognition handshake, not a secret (see the version note below).
 - `log_file` — where to append activity. Defaults to `listener.log` **beside the exe and the
-  config**, so all three of the listener's files sit in one folder you can open. An empty
-  string disables logging. The one deployment that can't honour that is a listener installed
-  into `Program Files`, whose folder the user it runs as cannot write; there the log falls
-  back to `%LOCALAPPDATA%\GaCaSy\listener.log` rather than going silent.
+  config**, so all three of the listener's files sit in one folder you can open — and for an
+  installed listener that folder is `%LOCALAPPDATA%\GaCaSy\`, which it can always write. An
+  empty string disables logging. A copy dropped by hand somewhere read-only falls back to
+  `%LOCALAPPDATA%\GaCaSy\listener.log` rather than going silent; that is the same folder an
+  install uses, so there is only ever one place to look for this file.
 - `debounce_seconds` — how long to ignore repeat arrivals for a drive letter just handled.
 
 ### An empty `keys` list trusts everything

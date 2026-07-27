@@ -1,0 +1,31 @@
+[package]
+name = "xtask"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+
+# Never shipped, never linked into anything that is. This crate exists so that
+# "build a release" is one command instead of a four-step sequence with an
+# ordering constraint you only notice getting wrong in production. It is
+# deliberately excluded from the workspace's default-members.
+[dependencies]
+# Where the signature goes. The one thing xtask shares with the programs.
+sigblock = { path = "../sigblock" }
+
+# Signing. The reference Rust implementation, by minisign's author, so what we
+# produce is a real .minisig and not a lookalike.
+minisign = "0.9.1"
+
+# Verifying — the same crate the listener uses, on purpose. `xtask verify`
+# should reach its conclusion the way the listener will reach its, not by a
+# second implementation that could agree with the signer and disagree with the
+# checker.
+minisign-verify = "0.2.5"
+
+# Reading the workspace and crate manifests for the version consistency check.
+toml = "0.9.8"
+
+# A hidden prompt for the signing key's password. Only reached when neither the
+# environment nor .env supplies one.
+rpassword = "7.4.0"

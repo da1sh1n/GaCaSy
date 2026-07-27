@@ -25,12 +25,11 @@ GaCaSy is made of three apps:
   a console. On Windows that's a small background app; on Linux nothing runs at all until
   you plug something in. *(Windows build works; Linux not started.)*
 - **Installer** — the one file you download. It turns blank media into a cartridge,
-  installs the listener, and edits cartridges you already made. *(Coming soon; not built
-  yet.)*
+  installs the listener, and edits cartridges you already made. Everything else is carried
+  inside it: no downloads, no prerequisites. *(Built; not yet tried on real media.)*
 
-Today the **launcher works** and so does the **Windows listener** — but with no installer
-yet, you set both up by hand: copy files onto the cartridge, write its `.cartridge` marker,
-and start the listener yourself.
+All three build and run on Windows. The manual setup below still works and is still the
+documented path until the installer has been through an end-to-end run on a real drive.
 
 > Developers: each app documents itself — [launcher/structure.md](launcher/structure.md)
 > (cartridge side), [listener/structure.md](listener/structure.md) (PC side), and
@@ -76,10 +75,22 @@ GaCaSy/
     structure.md     Spec for the PC-side listener — including the two
                      execution models (resident on Windows, one-shot on Linux)
     TODO.md          Build order for the listener
-  installer/         The setup app (coming soon)
-    structure.md     Spec for the setup side — makes cartridges, installs
-                     the listener, edits existing cartridges
-    TODO.md          Build order for the installer
+  installer/         The setup app (Rust + egui) — one self-contained exe
+    build.rs         Stages the payload; fails the build if it's missing
+    src/
+      main.rs        Entry point and the module map
+      app.rs         Wizard state and the create-vs-edit routing rule
+      ui/            The screens; ui/mod.rs is the shell and the footer
+      payload.rs     The embedded launcher, listener and seed files
+      cartridge.rs   The write: copy, catalog, config, launcher, marker
+      listener.rs    Job 2 — install folder, key merge, Run entry
+      detect.rs      Finding a game's exe, and measuring the folder
+      volume.rs      Which drives can be cartridges, and which already are
+      copy.rs        The cancellable, measured file copy
+      catalog.rs / marker.rs / image.rs / key.rs / work.rs
+    structure.md     Reference for the setup side
+    TODO.md          What's left — chiefly a run on real media
+  Cargo.toml         Workspace tying the three crates together
   README.md          This file
   LICENSE            GNU GPL v3.0-or-later
 ```
@@ -146,10 +157,31 @@ keys = ["pick-any-string"]
 in. See [listener/README.md](listener/README.md) and
 [listener/structure.md](listener/structure.md) for the rest.
 
-### The installer — *coming soon*
+### The installer — *built, not yet tried on real media*
 
-The piece that makes all of the above unnecessary: one download that writes the cartridge
-and sets up the listener for you. See [installer/structure.md](installer/structure.md).
+The piece that makes all of the above unnecessary: one file that writes the cartridge and
+sets up the listener for you. It carries the launcher, the listener and their seed files
+inside itself and downloads nothing.
+
+Build it in two steps — it embeds the other two binaries, so they have to exist first:
+
+```sh
+cargo build --release               # launcher + listener
+cargo build --release -p installer  # embeds what that produced
+```
+
+`target/release/installer.exe` then does three things:
+
+- **Make or edit a cartridge** — pick an **external** drive (internal disks and the one
+  Windows is on are not offered), choose a key, add game folders (it finds each game's exe for
+  you and asks when it can't be sure), pick covers, and copy. A drive that is already a
+  cartridge opens for editing instead: add games, remove games, change the key.
+- **Set up this PC** — installs the listener to `%LOCALAPPDATA%\GaCaSy\`, where it keeps its
+  config and its log too. Pairs it with your cartridge's key, starts it, and registers it to
+  start at login. **Nothing in the installer asks for administrator**, this included.
+- **Uninstall** — removes the folder *and* the login entry.
+
+See [installer/structure.md](installer/structure.md) for how it decides all of that.
 
 ---
 

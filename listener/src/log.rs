@@ -20,7 +20,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::config;
+use crate::settings;
 
 /// Rewrite the log from scratch once it passes this size. The Windows build is
 /// resident for a whole login session, so an unbounded append would grow
@@ -36,12 +36,13 @@ pub struct Log {
 impl Log {
     /// Opens (or creates) the log at `path`, creating parent folders as needed.
     ///
-    /// `None` means the config asked for no log at all, and is honoured as-is.
-    /// A path that *can't* be written to is different: that is the listener
-    /// losing its only voice, so rather than going quiet it retries at
-    /// [`config::fallback_log_path`] — the case being a listener installed into
-    /// `Program Files`, whose folder the user it runs as cannot write. Only if
-    /// that fails too does it fall silent.
+    /// `None` means no log at all, and is honoured as-is. A path that *can't* be
+    /// written to is different: that is the listener losing its only voice, so
+    /// rather than going quiet it retries at [`settings::fallback_log_path`]. An
+    /// *installed* listener never gets here — it lives in
+    /// `%LOCALAPPDATA%\GaCaSy`, which is both writable and the very folder the
+    /// fallback names — so this is for an exe dropped by hand somewhere
+    /// read-only. Only if that fails too does it fall silent.
     pub fn open(path: Option<PathBuf>) -> Log {
         let Some(path) = path else {
             return Log { path: None };
@@ -50,14 +51,12 @@ impl Log {
             return Log { path: Some(path) };
         }
         Log {
-            path: try_open(config::fallback_log_path()),
+            path: try_open(settings::fallback_log_path()),
         }
     }
 
     /// A log that discards everything, so the core can be exercised without
-    /// touching the filesystem. At runtime the same thing comes from
-    /// `Log::open(None)`, which is what an empty `log_file` in config.toml
-    /// produces.
+    /// touching the filesystem.
     #[cfg(test)]
     pub fn silent() -> Log {
         Log { path: None }

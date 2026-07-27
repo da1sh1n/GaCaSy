@@ -75,12 +75,16 @@ not this program's — running it by hand does nothing special.
 | `<exe folder>\listener.log` | the activity log (override with `log_file`) |
 | `<volume>\.cartridge` | the cartridge's marker: `version`, `key`, `launcher` |
 
+Installed, `<exe folder>` is **`%LOCALAPPDATA%\GaCaSy\`** — the exe, its config
+and its log, one folder, no administrator needed to put them there or to read
+them back.
+
 The log is worth knowing about: the listener has no console and no visible
 window, so it is the only way to see why a cartridge did or didn't launch.
 Every volume it looks at gets a line, including the ones it ignores and why.
-If the exe's folder is read-only — a listener installed into `Program Files` —
-the log falls back to `%LOCALAPPDATA%\GaCaSy\listener.log` rather than going
-silent.
+A copy dropped by hand into a read-only folder falls back to
+`%LOCALAPPDATA%\GaCaSy\listener.log` rather than going silent — the same folder
+an install uses, so there is one place to look either way.
 
 ## Trust
 

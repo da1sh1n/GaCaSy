@@ -29,10 +29,9 @@
 //!
 //! Installing the rule is the installer's job, not this program's.
 
-use crate::config::Config;
 use crate::log::Log;
 
-pub fn run(_config: Config, log: Log) {
+pub fn run(log: Log) {
     log.line(
         "the Linux trigger is not implemented yet — \
          run with `--check <mountpoint>` to exercise the shared core",

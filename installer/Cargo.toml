@@ -1,0 +1,61 @@
+[package]
+name = "installer"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+
+[dependencies]
+# egui, not a webview. The launcher can assume WebView2 because a cartridge is
+# plugged into a PC that already has it; the installer cannot, and with no
+# internet it would have no way to bootstrap the runtime it found missing. This
+# UI is statically linked and depends on nothing but the OS.
+eframe = { version = "0.35.0", default-features = false, features = [
+    "default_fonts",
+    "glow",
+] }
+
+# Native folder / file pickers. Windows-side this is the system IFileDialog, so
+# it adds no runtime dependency either.
+rfd = { version = "0.17.2", default-features = false }
+
+# catalog.json is written here and read by the launcher's `Game` struct, so it
+# is a real (de)serialization, unlike the listener's key-by-key TOML reads.
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+
+# The launcher's config.toml, which is look and feel only.
+toml = "0.9.8"
+
+# Reading this exe's own signature back out, for `--signature`.
+sigblock = { path = "../sigblock" }
+
+# `getrandom` was here to generate cartridge keys. There are no cartridge keys:
+# identity is the signature inside the launcher this installer carries, and the
+# installer neither makes nor holds any secret.
+
+# Checking, at build time, that the launcher and listener being embedded are
+# signed by a key the embedded listener will accept. Getting the sign-then-build
+# order wrong otherwise produces an installer that works, writes a cartridge that
+# looks right, and is silently ignored by every listener. See build.rs.
+[build-dependencies]
+sigblock = { path = "../sigblock" }
+minisign-verify = "0.2.5"
+
+[target.'cfg(windows)'.dependencies]
+# Nothing here elevates. The listener installs into %LOCALAPPDATA%\GaCaSy and a
+# cartridge goes on a drive the user can already write to, so there is no
+# process-token check and no ShellExecuteW "runas" — see src/listener.rs.
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    # Not elevation: `CreateFileW` takes a `*const SECURITY_ATTRIBUTES` (we pass
+    # null), and windows-sys gates the whole binding on this feature.
+    "Win32_Security",
+    "Win32_Storage_FileSystem",             # drive enumeration, labels, free space, BusType*
+    "Win32_System_Diagnostics_Debug",       # SetErrorMode
+    "Win32_System_Diagnostics_ToolHelp",    # finding a running listener to replace
+    "Win32_System_IO",                      # DeviceIoControl
+    "Win32_System_Ioctl",                   # IOCTL_STORAGE_QUERY_PROPERTY: is this drive external?
+    "Win32_System_Registry",                # the HKCU Run entry
+    "Win32_System_Threading",               # OpenProcess / process image paths
+    "Win32_System_WindowsProgramming",      # DRIVE_* constants
+] }

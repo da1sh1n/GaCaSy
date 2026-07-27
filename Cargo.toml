@@ -1,0 +1,47 @@
+# GaCaSy workspace — the three programs of the cartridge system, plus the two
+# crates that serve them.
+#
+#   launcher/   runs on the cartridge and shows the games
+#   listener/   runs on the PC and notices a cartridge being connected
+#   installer/  the one file a user downloads; writes both of the above
+#   sigblock/   the signature every one of them carries inside itself
+#   xtask/      builds and signs a release; never shipped
+#
+# The installer's build depends on the other two: it embeds their `--release`
+# binaries, which it finds in this workspace's shared `target/release/`. That
+# shared target directory is the reason the workspace exists — see
+# installer/build.rs.
+[workspace]
+resolver = "3"
+members = ["installer", "launcher", "listener", "sigblock", "xtask"]
+
+# The version every program reports from `--version`, and the contract between
+# them: two GaCaSy programs are compatible when this number matches. `y` and `z`
+# in each crate's own `x.y.z` are that crate's business — a launcher feature
+# bumps only the launcher — but `x` moves for all of them at once, because it
+# means "the way these programs talk to each other changed".
+#
+# The listener enforces it at runtime: it asks a verified launcher for its
+# version and refuses to start one whose `x` differs from its own. `xtask
+# release` enforces it at build time, refusing to ship a set of crates whose
+# majors have drifted apart.
+[workspace.metadata.gacasy]
+project_version = 0
+
+# The installer is deliberately NOT a default member, so the build happens in
+# the order its payload requires:
+#
+#   cargo build --release              launcher + listener
+#   cargo build --release -p installer embeds what the first step produced
+#
+# In one `--build the whole workspace` invocation cargo is free to run the
+# installer's build script while `launcher.exe` is still being linked, since
+# there is no dependency edge between them to order it (binary-artifact
+# dependencies are still unstable). Leaving it out of the default set makes the
+# correct order the natural one instead of a race that usually goes your way.
+#
+# xtask is out for a different reason: it is a build tool, not a product, and
+# nothing it depends on should ever end up linked into something we ship. It
+# still runs from anywhere in the workspace as `cargo run -p xtask -- …`.
+# sigblock is in, because both shipped programs link it.
+default-members = ["launcher", "listener", "sigblock"]

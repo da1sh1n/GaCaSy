@@ -40,7 +40,17 @@
 //   launch.rs     starting a game and deciding whether it came up
 //   log.rs        logs/launcher.log and each game's own output
 //   instance.rs   the single-instance mutex
+//   version.rs    --version / --signature, answered before anything else
 //   index.html    the UI itself, served over app://
+//
+// This exe carries its own minisign signature, appended past the end of the
+// image (see the sigblock crate). That signature is the cartridge's whole
+// identity: the listener reads it off the disk and refuses to start a launcher
+// it cannot verify. The launcher itself does nothing to earn that beyond being
+// the signed binary — it holds no secret and checks nothing.
+//
+//   launcher.exe --version     print x.y.z and exit
+//   launcher.exe --signature   print this exe's signature and exit
 //
 // Window sizing (see `constants`): the window wraps the covers on both axes —
 // covers aim for a fraction of the screen width and the window is just big
@@ -62,9 +72,18 @@ mod instance;
 mod launch;
 mod log;
 mod ui;
+mod version;
 mod window;
 
 fn main() -> wry::Result<()> {
+    // First, before anything touches the disk. The listener asks a verified
+    // launcher for its version, and a launcher that seeded folders or rewrote
+    // its own exe on the way to answering would be writing to the cartridge in
+    // response to a question. See version.rs.
+    if version::handled() {
+        return Ok(());
+    }
+
     let base_dir = content::resolve_base_dir();
     content::ensure_layout(&base_dir);
 

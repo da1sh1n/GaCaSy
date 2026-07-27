@@ -5,3 +5,17 @@ output/
 
 # WebView2's engine cache folder, wherever it lands in the tree.
 EBWebView/
+
+# Signing keys. `xtask keygen` puts the secret key outside the working tree
+# entirely and refuses to write one inside it, so this is the second lock on a
+# door that should already be shut — but a signing key reaching a public repo is
+# unrecoverable (every listener built against it would have to be replaced), and
+# one line here is cheap insurance.
+*.key
+.env
+
+# The public half of a locally generated key. Harmless to publish, but it is
+# *your* key: a listener built from this tree trusts it, and committing it would
+# quietly ask everyone else's build to trust it too. keys/gacasy.pub — the
+# release key — is tracked, and is the only one that should be.
+keys/dev.pub

@@ -46,9 +46,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     WS_OVERLAPPED,
 };
 
-use crate::config::Config;
 use crate::log::Log;
-use crate::volume;
+use crate::{settings, volume};
 
 /// Its own name, distinct from the launcher's `Local\GaCaSy.CartridgeLauncher`.
 /// `Local\` scopes it to the login session, which is the right scope for
@@ -64,7 +63,6 @@ const WINDOW_CLASS: &str = "GaCaSy.ListenerWindow";
 /// thread `run` is called from, so a thread-local is the same guarantee with
 /// none of the pointer casting.
 struct State {
-    config: Config,
     log: Log,
     /// When each drive letter was last acted on, for the debounce below.
     recent: HashMap<char, Instant>,
@@ -78,11 +76,11 @@ impl State {
     /// plug-in, and without this each one starts another launcher. Keyed on
     /// the drive letter, so swapping a *different* cartridge into the same
     /// letter inside the window would also be skipped — at a few seconds that
-    /// is not a real sequence, and the alternative (keying on the marker) means
-    /// reading the volume before deciding to skip it, which is most of the work
-    /// the debounce exists to avoid.
+    /// is not a real sequence, and the alternative (keying on something about
+    /// the volume) means reading and verifying it before deciding to skip it,
+    /// which is most of the work the debounce exists to avoid.
     fn debounced(&mut self, letter: char) -> bool {
-        let window = Duration::from_secs(self.config.debounce_seconds);
+        let window = Duration::from_secs(settings::DEBOUNCE_SECONDS);
         let now = Instant::now();
         if !window.is_zero()
             && let Some(previous) = self.recent.get(&letter)
@@ -101,7 +99,7 @@ thread_local! {
 
 /// Runs until logout. Returns early (without launching anything) if another
 /// instance already holds the mutex.
-pub fn run(config: Config, log: Log) {
+pub fn run(log: Log) {
     let Some(_instance) = acquire_single_instance() else {
         // The `Run` entry can fire twice across a fast logoff/logon, and two
         // listeners racing on one arrival means two launchers on screen.
@@ -118,7 +116,6 @@ pub fn run(config: Config, log: Log) {
     log.line("listener started");
     STATE.with(|state| {
         *state.borrow_mut() = Some(State {
-            config,
             log,
             recent: HashMap::new(),
         })
@@ -312,7 +309,7 @@ fn handle_letter(letter: char, reason: &str) {
             return;
         }
         let root = drive_root(letter);
-        volume::handle_volume(&root, &state.config, &state.log);
+        volume::handle_volume(&root, &state.log);
     });
 }
 

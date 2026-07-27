@@ -1,14 +1,23 @@
 [package]
 name = "listener"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 
 [dependencies]
-# The only dependency. `.cartridge` and config.toml are both TOML, and both are
-# read key-by-key as a `toml::Table` rather than deserialized into a struct, so
-# there is no serde derive here — see src/config.rs for why.
-toml = "0.9.8"
+# Where the signature lives inside launcher.exe. Zero dependencies of its own.
+sigblock = { path = "../sigblock" }
+
+# Verifying that signature — the whole trust model, in one zero-dependency
+# crate. Verify-only on purpose: this program has no business being able to
+# sign anything, and the signing half (scrypt, key handling) is weight it would
+# carry for nothing. That lives in xtask, which is never shipped.
+minisign-verify = "0.2.5"
+
+# `toml` used to be here for the retired `.cartridge` marker and this crate's
+# own config.toml. Both are gone — trust is compiled in (see build.rs) and
+# nothing is read from disk but the launcher itself — so on a non-Windows build
+# the two crates above are the entire dependency tree.
 
 # Windows-only: the resident trigger is entirely Win32. Nothing here is pulled
 # in on a Linux build.
@@ -19,10 +28,11 @@ windows-sys = { version = "0.61.2", features = [
     # though this window never paints.
     "Win32_Graphics_Gdi",
     "Win32_Security",
-    "Win32_Storage_FileSystem",             # GetLogicalDrives / GetDriveTypeW
-    "Win32_System_Diagnostics_Debug",       # SetErrorMode
-    "Win32_System_LibraryLoader",           # GetModuleHandleW
-    "Win32_System_Threading",               # CreateMutexW
-    "Win32_System_WindowsProgramming",      # DRIVE_* constants
-    "Win32_UI_WindowsAndMessaging",
+    "Win32_Storage_FileSystem",              # GetLogicalDrives / GetDriveTypeW
+    "Win32_System_Console",                  # AttachConsole, so --version prints
+    "Win32_System_Diagnostics_Debug",        # SetErrorMode
+    "Win32_System_LibraryLoader",            # GetModuleHandleW
+    "Win32_System_Threading",                # CreateMutexW
+    "Win32_System_WindowsProgramming",       # DRIVE_* constants
+    "Win32_UI_WindowsAndMessaging",          # the message loop, and MessageBoxW
 ] }
