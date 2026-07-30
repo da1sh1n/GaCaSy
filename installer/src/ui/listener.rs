@@ -20,9 +20,9 @@
 //! that starts shut. A user who skips the key field should know which of those
 //! they just did.
 
-use eframe::egui;
 
 use crate::app::App;
+use crate::autoplay;
 use crate::listener;
 
 use super::{BAD, GOOD, WARN};
@@ -92,6 +92,36 @@ pub fn screen(app: &mut App, ui: &mut egui::Ui) {
         "Start it now as well as at every login",
     );
 
+    // The other half of "plug it in and the launcher comes up". The listener
+    // starting the launcher is not enough on its own if Windows opens an
+    // Explorer window over it a moment later, which is what most PCs are set to
+    // do. Spelled out rather than done quietly because it is the one setting
+    // this installer changes that is not GaCaSy's own — see ../autoplay.rs.
+    let already = autoplay::suppressed();
+    ui.add_enabled_ui(!already, |ui| {
+        let mut ticked = app.suppress_autoplay || already;
+        if ui
+            .checkbox(
+                &mut ticked,
+                "Stop Windows opening a folder when a cartridge is plugged in",
+            )
+            .changed()
+        {
+            app.suppress_autoplay = ticked;
+        }
+    });
+    ui.label(
+        egui::RichText::new(if already {
+            "Already set — Windows takes no action when a removable drive arrives. \
+             Uninstalling the listener puts your previous setting back."
+        } else {
+            "Sets AutoPlay to \"Take no action\" for all removable drives on your account. \
+             Windows offers no per-device setting for a drive it has not seen before, so this \
+             is the only way to stop it. Uninstalling puts your previous setting back."
+        })
+        .weak(),
+    );
+
     ui.add_space(12.0);
     let blocked = listener::install_dir().is_none();
     let label = if installed_here {
@@ -121,6 +151,7 @@ fn installed(app: &mut App, ui: &mut egui::Ui) {
             "The listener is not installed. Cartridges won't auto-start.",
         );
         ui.add_space(6.0);
+        autoplay_status(ui);
         return;
     }
 
@@ -165,7 +196,38 @@ fn installed(app: &mut App, ui: &mut egui::Ui) {
         ui.add_space(4.0);
     }
 
+    autoplay_status(ui);
+
     if let Some(dir) = uninstall {
         app.uninstall_listener(&ctx, dir);
+    }
+}
+
+/// What Windows itself does when a drive arrives. Shown next to the install
+/// state because the two together are what "plugging a cartridge in works"
+/// actually means: a listener that starts the launcher, and nothing else
+/// opening on top of it.
+fn autoplay_status(ui: &mut egui::Ui) {
+    ui.add_space(4.0);
+    if autoplay::suppressed() {
+        ui.colored_label(
+            GOOD,
+            "Windows leaves removable drives alone — nothing opens over the launcher.",
+        );
+    } else if autoplay::opens_a_folder() {
+        ui.colored_label(
+            WARN,
+            "Windows opens a folder when a drive is plugged in — it will appear over the \
+             launcher.",
+        );
+    } else {
+        // Some other handler, or the "choose what to do" prompt. Still
+        // something arriving on screen uninvited, but not worth naming
+        // specifically when the fix below is the same either way.
+        ui.colored_label(
+            WARN,
+            "Windows does something of its own when a drive is plugged in, which may appear \
+             over the launcher.",
+        );
     }
 }

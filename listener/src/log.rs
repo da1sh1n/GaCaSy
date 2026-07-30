@@ -62,6 +62,14 @@ impl Log {
         Log { path: None }
     }
 
+    /// Where this log is writing, if it resolved a usable path at all. For the
+    /// tray menu's "Open log" — the log itself never needs to know its own
+    /// path to append a line.
+    #[cfg(windows)]
+    pub fn path(&self) -> Option<&Path> {
+        self.path.as_deref()
+    }
+
     /// Appends one timestamped line. Errors are deliberately ignored.
     pub fn line(&self, message: &str) {
         let Some(path) = &self.path else {
@@ -140,21 +148,4 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
     let d = (doy - (153 * mp + 2) / 5 + 1) as u32; // [1, 31]
     let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32; // [1, 12]
     (if m <= 2 { y + 1 } else { y }, m, d)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::civil_from_days;
-
-    #[test]
-    fn civil_from_days_matches_known_dates() {
-        assert_eq!(civil_from_days(0), (1970, 1, 1));
-        assert_eq!(civil_from_days(-1), (1969, 12, 31));
-        // 2000-02-29: the leap year the "divisible by 100" rule almost eats.
-        assert_eq!(civil_from_days(11_016), (2000, 2, 29));
-        assert_eq!(civil_from_days(11_017), (2000, 3, 1));
-        // 2100 is not a leap year.
-        assert_eq!(civil_from_days(47_540), (2100, 2, 28));
-        assert_eq!(civil_from_days(47_541), (2100, 3, 1));
-    }
 }

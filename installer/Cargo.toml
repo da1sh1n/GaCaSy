@@ -1,6 +1,6 @@
 [package]
 name = "installer"
-version = "0.1.0"
+version = "0.4.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 
@@ -9,10 +9,33 @@ license = "GPL-3.0-or-later"
 # plugged into a PC that already has it; the installer cannot, and with no
 # internet it would have no way to bootstrap the runtime it found missing. This
 # UI is statically linked and depends on nothing but the OS.
-eframe = { version = "0.35.0", default-features = false, features = [
-    "default_fonts",
-    "glow",
-] }
+#
+# `default_fonts` is deliberately absent. It embeds four typefaces — Ubuntu, Hack
+# and two emoji fonts, 1.4 MB — and this program reads the desktop's own UI font
+# off the disk instead, which is both smaller and the right look. See src/font.rs.
+egui = { version = "0.35.0", default-features = false }
+
+# `eframe` used to be here and is deliberately gone. It asks for `egui-winit`'s
+# `clipboard` and `links` features in its own manifest, and cargo features are
+# additive, so no dependent can turn them off: every installer built on eframe
+# links `arboard` (and therefore `image` and `png`, for pasting *pictures*) and
+# `webbrowser` (and therefore `url`, `idna` and seven `icu_*` crates of Unicode
+# tables, for opening links this program does not contain).
+#
+# `egui_glow` offers the same integration with those two behind flags of its own,
+# left off here. What eframe did on top of that — open a window, run an event
+# loop — is src/shell.rs, and the clipboard is two Win32 calls in
+# src/clipboard.rs. Together that is around 2 MB of binary this installer no
+# longer carries.
+egui_glow = { version = "0.35.0", default-features = false, features = ["winit"] }
+glutin = { version = "0.32.3", default-features = false, features = ["wgl"] }
+glutin-winit = { version = "0.5.0", default-features = false, features = ["wgl"] }
+
+# The one typeface carried, and only as the fallback behind the system font. This
+# is the crate egui itself takes its built-ins from, so Ubuntu-Light arrives with
+# its licence already in the dependency tree and nothing is vendored here. The
+# other three faces in it go unreferenced and the linker drops them.
+epaint_default_fonts = "0.35.0"
 
 # Native folder / file pickers. Windows-side this is the system IFileDialog, so
 # it adds no runtime dependency either.
@@ -24,10 +47,23 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 
 # The launcher's config.toml, which is look and feel only.
-toml = "0.9.8"
+toml = "1.1.4"
 
 # Reading this exe's own signature back out, for `--signature`.
 sigblock = { path = "../sigblock" }
+
+# Unpacking the two programs this installer carries, packed by build.rs. Only the
+# decoder is reachable from the binary, so the linker drops the encoder half.
+#
+# Deflate rather than LZMA, which is the better algorithm on paper: the pure-Rust
+# LZMA encoder (`lzma-rs`) has no match finder — it calls itself `dumbencoder` —
+# and lands 165 KB *worse* than zlib on these two exes, while every LZMA
+# implementation that would beat zlib wants a C toolchain at build time. This
+# whole workspace builds with nothing but cargo, and that is worth more than the
+# ~90 KB an xz-grade packer would save over this.
+#
+# `rust_backend` is what keeps that promise: miniz_oxide, no zlib-sys, no cc.
+flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"] }
 
 # `getrandom` was here to generate cartridge keys. There are no cartridge keys:
 # identity is the signature inside the launcher this installer carries, and the
@@ -41,6 +77,13 @@ sigblock = { path = "../sigblock" }
 sigblock = { path = "../sigblock" }
 minisign-verify = "0.2.5"
 
+# Packing the payload. A build dependency too, so the compressor never ships.
+flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"] }
+
+# Reading the bundled launcher's version straight from ../launcher/Cargo.toml — its
+# [package].version is the source of truth, not anything the built exe reports.
+toml = "1.1.4"
+
 [target.'cfg(windows)'.dependencies]
 # Nothing here elevates. The listener installs into %LOCALAPPDATA%\GaCaSy and a
 # cartridge goes on a drive the user can already write to, so there is no
@@ -50,6 +93,11 @@ windows-sys = { version = "0.61.2", features = [
     # Not elevation: `CreateFileW` takes a `*const SECURITY_ATTRIBUTES` (we pass
     # null), and windows-sys gates the whole binding on this feature.
     "Win32_Security",
+    "Win32_Graphics_Gdi",                   # LOGFONTW, which NONCLIENTMETRICSW is gated on
+    "Win32_UI_WindowsAndMessaging",         # which font the desktop draws dialogs in
+    "Win32_System_DataExchange",            # the clipboard, for the one text field
+    "Win32_System_Memory",                  # and the block the clipboard takes ownership of
+    "Win32_System_Ole",                     # CF_UNICODETEXT lives here, oddly
     "Win32_Storage_FileSystem",             # drive enumeration, labels, free space, BusType*
     "Win32_System_Diagnostics_Debug",       # SetErrorMode
     "Win32_System_Diagnostics_ToolHelp",    # finding a running listener to replace

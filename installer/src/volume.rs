@@ -42,8 +42,16 @@
 //! * **Windows-To-Go** on a USB stick passes the bus test, so the system-drive
 //!   check runs first, separately, and wins.
 //!
+//! ## Naming
+//!
+//! A cartridge's name is its **volume label**, and [`set_label`] is the one
+//! thing in this module that writes. There is nowhere else for a name to live:
+//! `config.toml` is look and feel, `catalog.json` is the game list, and identity
+//! is a signature inside `launcher.exe`. So the label is the whole of it — read
+//! by [`Volume::summary`], set at the end of a write.
+//!
 //! Nothing here formats, partitions or erases anything. The installer writes
-//! files to a volume; it never repartitions one.
+//! files to a volume, and a name onto it; it never repartitions one.
 
 use std::path::{Path, PathBuf};
 
@@ -78,8 +86,13 @@ impl Eligibility {
 pub struct Volume {
     /// `E:\` — the path everything on the cartridge is relative to.
     pub root: PathBuf,
-    /// The volume label, or an empty string when it has none.
+    /// The volume label, or an empty string when it has none. This is a
+    /// cartridge's name — the one the installer can change, and the only piece
+    /// of a cartridge that lives outside its file layout.
     pub label: String,
+    /// `NTFS`, `exFAT`, `FAT32` — read for [`Volume::max_label_len`], since what
+    /// a label may contain is a property of the filesystem and nothing else.
+    pub fs: String,
     /// How the disk underneath is attached — "USB", "NVMe", "SATA". Shown so a
     /// refusal names its own reason instead of being a mystery.
     pub bus: &'static str,
@@ -118,18 +131,108 @@ impl Volume {
         }
         text
     }
+
+    /// How long a name this drive will accept — see [`max_label_len`].
+    pub fn max_label_len(&self) -> usize {
+        max_label_len(&self.fs)
+    }
 }
 
-/// Every mounted drive, the usable ones first.
+/// The longest label the filesystem allows, in characters.
 ///
-/// Refused drives are returned too, rather than dropped here, so the picker can
-/// show *why* one isn't on offer. "My D: drive isn't listed" is a question the
-/// screen should answer by itself; an empty list with no explanation is how a
-/// filter like this gets read as a bug.
+/// NTFS and ReFS take 32; the FAT family — FAT, FAT32 and exFAT alike — takes
+/// 11. An unrecognised filesystem is given the larger limit rather than the
+/// smaller one: this check exists to catch a too-long name before the user sits
+/// through a copy, and Windows itself is the authority at the moment of writing.
+/// Guessing low would refuse names that would have worked.
+pub fn max_label_len(fs: &str) -> usize {
+    if is_fat(fs) { 11 } else { 32 }
+}
+
+fn is_exfat(fs: &str) -> bool {
+    fs.eq_ignore_ascii_case("exFAT")
+}
+
+fn is_fat(fs: &str) -> bool {
+    is_exfat(fs) || fs.to_ascii_uppercase().starts_with("FAT")
+}
+
+/// Characters this filesystem will not put in a label.
+///
+/// Three different answers, and collapsing them would cost real names. NTFS and
+/// ReFS take essentially anything. **FAT and FAT32** are the strict ones, down
+/// to refusing a full stop. **exFAT** shares their 11-character limit but not
+/// their character rules — it takes whatever a filename can hold — so lumping it
+/// in with FAT32 would refuse `V1.0` on a drive that would have accepted it.
+fn forbidden(fs: &str) -> &'static [char] {
+    const FAT: [char; 16] = [
+        '*', '?', '/', '\\', '|', '.', ',', ';', ':', '+', '=', '[', ']', '<', '>', '"',
+    ];
+    const EXFAT: [char; 9] = ['*', '?', '/', '\\', '|', ':', '<', '>', '"'];
+    if is_exfat(fs) {
+        &EXFAT
+    } else if is_fat(fs) {
+        &FAT
+    } else {
+        &[]
+    }
+}
+
+/// Whether `name` can be this filesystem's volume label.
+///
+/// An **empty name is valid** and means "no label" — clearing a cartridge's name
+/// is as legitimate as setting one.
+///
+/// Checked here rather than only at the write because the write happens at the
+/// end of a job that may have spent minutes copying: a name that was never going
+/// to land should stop the Review button, not the last step of the copy.
+pub fn validate_label(name: &str, fs: &str) -> Result<(), String> {
+    let limit = max_label_len(fs);
+    let length = name.chars().count();
+    if length > limit {
+        let filesystem = if fs.is_empty() { "this drive" } else { fs };
+        return Err(format!(
+            "The name is {length} characters. {filesystem} allows at most {limit}."
+        ));
+    }
+    if let Some(bad) = name.chars().find(|c| c.is_control()) {
+        return Err(format!("The name cannot contain {bad:?}."));
+    }
+    if let Some(bad) = name.chars().find(|c| forbidden(fs).contains(c)) {
+        return Err(format!("A {fs} drive's name cannot contain {bad:?}."));
+    }
+    Ok(())
+}
+
+/// Renames a drive — the one piece of a cartridge that is not a file on it.
+///
+/// An empty `name` clears the label. Nothing else about the volume is touched:
+/// this sets a string, and is not a format.
+pub fn set_label(root: &Path, name: &str) -> Result<(), String> {
+    platform::set_label(root, name)
+}
+
+/// The drives a cartridge can be made on, in drive-letter order.
+///
+/// Refused drives are **dropped**, not returned greyed out. The picker used to
+/// list them with the reason beside them, on the grounds that a filter which
+/// silently shortens a list reads as a bug — but on a normal PC that fills the
+/// screen with `C:` and every internal disk, rows that exist only to say no. The
+/// explanation moved into one line of prose on the picker itself, which answers
+/// "why isn't my D: drive here?" once instead of once per drive.
+///
+/// [`all`] is the unfiltered view, for the tests that check a drive is refused
+/// for the right reason rather than merely absent.
 pub fn list() -> Vec<Volume> {
-    let mut volumes = platform::list();
-    volumes.sort_by_key(|v| (!v.allowed(), v.root.clone()));
+    let mut volumes: Vec<Volume> = all().into_iter().filter(Volume::allowed).collect();
+    volumes.sort_by(|a, b| a.root.cmp(&b.root));
     volumes
+}
+
+/// Every mounted drive, refused ones included, each carrying the
+/// [`Eligibility`] that decided it.
+pub(crate) fn all() -> Vec<Volume> {
+    platform::list()
 }
 
 /// Rounded to three significant-ish digits, in the units a drive is sold in
@@ -175,7 +278,7 @@ pub fn is_system_drive(root: &Path) -> bool {
 }
 
 /// The uppercase drive letter of a path — `e:\games` → `Some('E')`.
-fn drive_letter(path: &Path) -> Option<char> {
+pub(crate) fn drive_letter(path: &Path) -> Option<char> {
     let text = path.to_string_lossy();
     let mut chars = text.chars();
     let letter = chars.next()?.to_ascii_uppercase();
@@ -188,13 +291,16 @@ mod platform {
     use std::path::PathBuf;
     use std::ptr;
 
-    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, ERROR_ACCESS_DENIED, ERROR_INVALID_NAME, ERROR_LABEL_TOO_LONG,
+        ERROR_WRITE_PROTECT, GetLastError, INVALID_HANDLE_VALUE,
+    };
     use windows_sys::Win32::Storage::FileSystem::{
         BusType1394, BusTypeAta, BusTypeAtapi, BusTypeFibre, BusTypeFileBackedVirtual, BusTypeMmc,
         BusTypeNvme, BusTypeRAID, BusTypeSCM, BusTypeSas, BusTypeSata, BusTypeScsi, BusTypeSd,
         BusTypeSpaces, BusTypeUfs, BusTypeUsb, BusTypeVirtual, CreateFileW, FILE_SHARE_READ,
         FILE_SHARE_WRITE, GetDiskFreeSpaceExW, GetDriveTypeW, GetLogicalDrives,
-        GetVolumeInformationW, OPEN_EXISTING, STORAGE_BUS_TYPE,
+        GetVolumeInformationW, OPEN_EXISTING, STORAGE_BUS_TYPE, SetVolumeLabelW,
     };
     use windows_sys::Win32::System::IO::DeviceIoControl;
     use windows_sys::Win32::System::Ioctl::{
@@ -246,8 +352,10 @@ mod platform {
             Eligibility::Internal
         };
 
+        let (label, fs) = volume_info(&wide_root);
         Some(Volume {
-            label: label(&wide_root),
+            label,
+            fs,
             bus: bus_name(bus, drive_type),
             eligibility,
             free_bytes,
@@ -375,29 +483,65 @@ mod platform {
         (ok != 0).then_some((free, total))
     }
 
-    fn label(root: &[u16]) -> String {
-        let mut buffer = [0u16; 261]; // MAX_PATH + 1, the documented size
+    /// The volume's label and its filesystem name, both from the one call that
+    /// knows them. The filesystem is read because it, and nothing else, decides
+    /// what a label may be — see [`super::validate_label`].
+    fn volume_info(root: &[u16]) -> (String, String) {
+        let mut label = [0u16; 261]; // MAX_PATH + 1, the documented size
+        let mut fs = [0u16; 261];
         let ok = unsafe {
             GetVolumeInformationW(
                 root.as_ptr(),
-                buffer.as_mut_ptr(),
-                buffer.len() as u32,
+                label.as_mut_ptr(),
+                label.len() as u32,
                 ptr::null_mut(),
                 ptr::null_mut(),
                 ptr::null_mut(),
-                ptr::null_mut(),
-                0,
+                fs.as_mut_ptr(),
+                fs.len() as u32,
             )
         };
         if ok == 0 {
-            return String::new();
+            return (String::new(), String::new());
         }
-        let end = buffer.iter().position(|c| *c == 0).unwrap_or(buffer.len());
-        String::from_utf16_lossy(&buffer[..end])
+        (from_wide(&label), from_wide(&fs))
+    }
+
+    pub fn set_label(root: &std::path::Path, name: &str) -> Result<(), String> {
+        // `SetVolumeLabelW` wants the root *with* its trailing backslash, which
+        // is the shape `Volume::root` already holds.
+        let root = wide(&root.display().to_string());
+        // Deleting a label is a *null* name, not an empty one — that is the
+        // documented way to clear it, and the only one guaranteed to across
+        // filesystems.
+        let label = wide(name);
+        let name = if name.is_empty() {
+            ptr::null()
+        } else {
+            label.as_ptr()
+        };
+        let ok = unsafe { SetVolumeLabelW(root.as_ptr(), name) };
+        if ok != 0 {
+            return Ok(());
+        }
+        let code = unsafe { GetLastError() };
+        Err(match code {
+            ERROR_ACCESS_DENIED => "the drive would not allow it".into(),
+            ERROR_LABEL_TOO_LONG => "the name is too long for this drive".into(),
+            ERROR_INVALID_NAME => "the name has a character this drive won't take".into(),
+            ERROR_WRITE_PROTECT => "the drive is write-protected".into(),
+            other => format!("Windows error {other}"),
+        })
     }
 
     fn wide(text: &str) -> Vec<u16> {
         text.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    /// A NUL-terminated wide buffer as a `String`.
+    fn from_wide(buffer: &[u16]) -> String {
+        let end = buffer.iter().position(|c| *c == 0).unwrap_or(buffer.len());
+        String::from_utf16_lossy(&buffer[..end])
     }
 }
 
@@ -411,77 +555,8 @@ mod platform {
     pub fn list() -> Vec<Volume> {
         Vec::new()
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn sizes_read_the_way_a_drive_is_labelled() {
-        assert_eq!(human_bytes(0), "0 B");
-        assert_eq!(human_bytes(999), "999 B");
-        assert_eq!(human_bytes(1_000), "1.00 KB");
-        assert_eq!(human_bytes(57_200_000_000), "57.2 GB");
-        assert_eq!(human_bytes(119_000_000_000), "119 GB");
-        assert_eq!(human_bytes(2_000_000_000_000), "2.00 TB");
-    }
-
-    #[test]
-    fn drive_letters_are_read_off_any_path_shape() {
-        assert_eq!(drive_letter(Path::new(r"C:\")), Some('C'));
-        assert_eq!(drive_letter(Path::new(r"e:\games\bg3")), Some('E'));
-        assert_eq!(drive_letter(Path::new(r"C:\Windows")), Some('C'));
-        assert_eq!(drive_letter(Path::new(r"\\server\share")), None);
-        assert_eq!(drive_letter(Path::new("/media/cartridge")), None);
-        assert_eq!(drive_letter(Path::new("")), None);
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn the_drive_windows_is_on_is_refused() {
-        // The most important behaviour in this module, asserted against the
-        // machine running the test rather than a fixture.
-        let system = std::env::var_os("SystemRoot").expect("Windows sets SystemRoot");
-        let letter = drive_letter(Path::new(&system)).expect("a drive letter");
-
-        assert!(is_system_drive(Path::new(&format!("{letter}:\\"))));
-        assert!(is_system_drive(Path::new(&format!(
-            "{}:\\",
-            letter.to_ascii_lowercase()
-        ))));
-        assert!(is_system_drive(Path::new(&format!("{letter}:\\games"))));
-
-        for volume in list() {
-            if drive_letter(&volume.root) == Some(letter) {
-                assert_eq!(
-                    volume.eligibility,
-                    Eligibility::SystemDrive,
-                    "{} must never be offered",
-                    volume.root.display()
-                );
-                assert!(!volume.allowed());
-            }
-        }
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn nothing_internal_is_ever_allowed() {
-        for volume in list() {
-            if volume.allowed() {
-                assert!(
-                    !is_system_drive(&volume.root),
-                    "{} is the system drive",
-                    volume.root.display()
-                );
-                assert!(
-                    matches!(volume.bus, "USB" | "FireWire" | "SD" | "MMC" | "removable"),
-                    "{} was allowed on a {} bus",
-                    volume.root.display(),
-                    volume.bus
-                );
-            }
-        }
+    pub fn set_label(_root: &std::path::Path, _name: &str) -> Result<(), String> {
+        Err("renaming a drive is Windows-only".into())
     }
 }

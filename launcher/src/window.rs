@@ -30,6 +30,14 @@ pub fn size<T>(
     gap: f64,
     margin: f64,
 ) -> (f64, f64) {
+    // An empty catalog has no covers to wrap, and the math below would size the
+    // window for one anyway (`max(1)`) — a tall 2:3 box holding a single line of
+    // text. The page shows its empty state instead, so give it the same ordinary
+    // window the no-monitor case gets.
+    if game_count == 0 {
+        return (FALLBACK_WINDOW_W, FALLBACK_WINDOW_H);
+    }
+
     let Some(monitor) = event_loop.primary_monitor() else {
         return (FALLBACK_WINDOW_W, FALLBACK_WINDOW_H);
     };
@@ -73,4 +81,33 @@ pub fn center(window: &tao::window::Window) {
     let y = (monitor_size.height as i32 - window_size.height as i32) / 2;
 
     window.set_outer_position(Position::Physical(PhysicalPosition::new(x, y)));
+}
+
+/// Brings the window to the front and pins it there briefly.
+///
+/// The launcher is not started by the person looking at the screen — the
+/// listener spawns it from its message-pump thread when a cartridge arrives —
+/// so this process has never had the foreground and never received an input
+/// event. Windows' foreground lock refuses `SetForegroundWindow` on that basis
+/// and flashes the taskbar button instead, which for a launcher that is
+/// supposed to *be* the response to plugging something in is no response at
+/// all. `set_focus` is tao's `force_window_active`: it tries the plain call
+/// first and only falls back to lifting the lock (a synthesised Alt press, so
+/// the process has "received input") if that is refused.
+///
+/// Topmost is the other half. Focus is a one-off, and it is lost to any window
+/// that appears a moment *after* us — which is exactly what an AutoPlay Explorer
+/// window does, since it opens off the same device event. Held only for
+/// [`TOPMOST_GRACE`] and then dropped by the event loop, so a launcher still on
+/// screen later cannot end up hovering over a running game.
+pub fn raise(window: &tao::window::Window) {
+    window.set_always_on_top(true);
+    window.set_focus();
+}
+
+/// Ends the [`raise`] grace period, putting the window back in the normal
+/// z-order. Separate from `raise` because the wait between them belongs to the
+/// event loop, which is the only thing that can wait without blocking the UI.
+pub fn drop_topmost(window: &tao::window::Window) {
+    window.set_always_on_top(false);
 }

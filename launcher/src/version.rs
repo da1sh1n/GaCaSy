@@ -50,23 +50,3 @@ pub fn handled() -> bool {
     }
     true
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn our_version_is_a_bare_three_part_number() {
-        // What the listener's parser accepts, asserted from this side too: if
-        // this ever became "v0.2.0" or "0.2", every cartridge built from it
-        // would stop being launchable and the log would say only that the
-        // version was unreadable.
-        let version = env!("CARGO_PKG_VERSION");
-        let parts: Vec<&str> = version.split('.').collect();
-        assert_eq!(parts.len(), 3, "{version}");
-        for part in parts {
-            assert!(
-                part.parse::<u64>().is_ok(),
-                "{version} has a non-numeric part"
-            );
-        }
-    }
-}

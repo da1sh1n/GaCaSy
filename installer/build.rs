@@ -15,6 +15,12 @@
 //! Staging through `OUT_DIR` rather than pointing `include_bytes!` straight at
 //! `target/release/launcher.exe` is what lets a missing artifact fail with a
 //! sentence you can act on, instead of a compiler error about a path.
+//!
+//! The two binaries are **compressed** on the way in — an exe is about half its
+//! size deflated, and this installer is the one file a user downloads. They come
+//! back out byte-identical, which they have to: the signature inside
+//! `launcher.exe` is what makes a cartridge a cartridge, and it is checked here
+//! against the uncompressed original before any of this happens.
 
 use std::env;
 use std::fs;
@@ -32,6 +38,10 @@ const OPTIONAL: &str = "GACASY_PAYLOAD_OPTIONAL";
 struct Item {
     /// Name it is staged under in `OUT_DIR`; `payload.rs` includes these.
     staged: &'static str,
+    /// Constant written into `sizes.rs` holding the size this unpacks back to.
+    /// The free-space check needs it, and the compressed length does not answer
+    /// the question "will this fit on the drive".
+    size_const: &'static str,
     /// Env var that overrides where it comes from, for builds that put
     /// artifacts somewhere unusual.
     env_override: &'static str,
@@ -52,7 +62,8 @@ fn main() {
     let binaries = [
         (
             Item {
-                staged: "launcher.exe",
+                staged: "launcher.exe.z",
+                size_const: "LAUNCHER_BYTES",
                 env_override: "GACASY_LAUNCHER_EXE",
                 remedy: "cargo build --release -p launcher",
             },
@@ -60,7 +71,8 @@ fn main() {
         ),
         (
             Item {
-                staged: "listener.exe",
+                staged: "listener.exe.z",
+                size_const: "LISTENER_BYTES",
                 env_override: "GACASY_LISTENER_EXE",
                 remedy: "cargo build --release -p listener",
             },
@@ -77,6 +89,7 @@ fn main() {
 
     let optional = env::var_os(OPTIONAL).is_some_and(|v| !v.is_empty());
     let mut missing = Vec::new();
+    let mut sizes = String::new();
 
     for (item, default) in &binaries {
         println!("cargo::rerun-if-env-changed={}", item.env_override);
@@ -85,6 +98,7 @@ fn main() {
             .unwrap_or_else(|| default.clone());
         println!("cargo::rerun-if-changed={}", source.display());
 
+        let mut unpacked = 0;
         if source.is_file() {
             // Skipped under the escape hatch: that build is for working on the
             // UI, already refuses to install anything, and demanding a signed
@@ -94,7 +108,9 @@ fn main() {
             {
                 missing.push(problem);
             }
-            stage(&source, &out_dir.join(item.staged));
+            // Signature checked above, against these same bytes, before they are
+            // packed. Nothing downstream can verify a compressed launcher.
+            unpacked = squeeze(&source, &out_dir.join(item.staged));
         } else if optional {
             fs::write(out_dir.join(item.staged), []).expect("stage an empty payload slot");
         } else {
@@ -105,7 +121,12 @@ fn main() {
                 item.env_override
             ));
         }
+        sizes.push_str(&format!(
+            "pub const {}: u64 = {unpacked};\n",
+            item.size_const
+        ));
     }
+    fs::write(out_dir.join("sizes.rs"), sizes).expect("write the unpacked payload sizes");
 
     for (staged, source) in &seeds {
         println!("cargo::rerun-if-changed={}", source.display());
@@ -129,6 +150,37 @@ fn main() {
              UI-only build that refuses to install."
         );
     }
+
+    stage_launcher_version(&out_dir, &manifest);
+}
+
+/// Writes `LAUNCHER_VERSION`, read from `../launcher/Cargo.toml`'s `[package].version`
+/// — not from the built exe. That manifest field is the one place the launcher's
+/// version is declared, so it is the only place the installer should read it from.
+///
+/// Unlike the binary payload above, there is no escape hatch here: this reads
+/// source, not a build artifact, so a missing or malformed manifest means the repo
+/// itself is broken and the build should fail loudly rather than stage a fallback.
+fn stage_launcher_version(out_dir: &Path, manifest: &Path) {
+    let path = manifest.join("../launcher/Cargo.toml");
+    println!("cargo::rerun-if-changed={}", path.display());
+
+    let text = fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("could not read {}: {e}", path.display()));
+    let table: toml::Table = text
+        .parse()
+        .unwrap_or_else(|e| panic!("{} is not valid TOML: {e}", path.display()));
+    let version = table
+        .get("package")
+        .and_then(|v| v.get("version"))
+        .and_then(|v| v.as_str())
+        .unwrap_or_else(|| panic!("{} has no [package].version", path.display()));
+
+    fs::write(
+        out_dir.join("launcher-version.rs"),
+        format!("pub const LAUNCHER_VERSION: &str = {version:?};\n"),
+    )
+    .expect("write the bundled launcher's version");
 }
 
 /// The `--release` output folder holding `launcher.exe` and `listener.exe`.
@@ -222,6 +274,30 @@ fn exe_name(stem: &str) -> String {
 
 /// Copies one payload file into `OUT_DIR`. A failure here is a broken build
 /// environment, not a user mistake, so it panics rather than reporting.
+/// Compresses one payload binary into `OUT_DIR`, returning its original size.
+///
+/// zlib rather than raw deflate, for the six bytes of header and the Adler-32
+/// trailer. These are the bytes a cartridge's identity is made of — see
+/// payload.rs — so a checksum over them is worth more than the six bytes it
+/// costs. The exes go to roughly half their size.
+fn squeeze(source: &Path, staged: &Path) -> u64 {
+    use std::io::Write as _;
+
+    let bytes = fs::read(source)
+        .unwrap_or_else(|e| panic!("failed to read {} for packing: {e}", source.display()));
+
+    let mut encoder =
+        flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+    encoder
+        .write_all(&bytes)
+        .and_then(|()| encoder.finish())
+        .map(|packed| fs::write(staged, packed))
+        .unwrap_or_else(|e| panic!("failed to pack {}: {e}", source.display()))
+        .unwrap_or_else(|e| panic!("failed to stage {}: {e}", staged.display()));
+
+    bytes.len() as u64
+}
+
 fn stage(source: &Path, staged: &Path) {
     fs::copy(source, staged).unwrap_or_else(|e| {
         panic!(

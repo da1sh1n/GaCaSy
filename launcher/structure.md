@@ -123,7 +123,10 @@ still an invisible process makes a working launch look like a broken one.
 
 1. **Spawn.** `output/<game.exe>`, with the cwd set to **the exe's own folder** — games
    resolve their assets relative to themselves, and the wrong cwd fails in ways that look
-   like corruption. stdout/stderr are redirected into `logs/<game>/`.
+   like corruption. stdout/stderr are redirected into `logs/<game>/`. Unless
+   `show_console_window` is set, spawned with `CREATE_NO_WINDOW` so a console-mode exe
+   (typically a windowless stand-in cover, since a real game is GUI) doesn't pop a console
+   window up — a GUI game has no console to begin with, so this never affects one.
 2. **Wait, off the UI thread.** A worker thread calls `WaitForInputIdle` (30 s cap), so
    the page keeps animating. A timeout still counts as started — a slow game is not a
    failed one. `WAIT_FAILED` means a console program, not a failure: that (and any
@@ -178,13 +181,22 @@ The launcher has no console, so `logs/` is the only place a failure can be expla
   as a `toml::Table` and pulls one key at a time rather than deserializing into a
   struct, so unknown keys and wrong-typed values cost only that setting (it falls back
   to its default) and an older config still works; only a file that isn't valid TOML at
-  all drops every setting to defaults. Knobs: `show_captions` (bool), `border_gap`,
-  `image_gap`, `corner_radius`, `shadow_size`, `shadow_fade`, `error_border_width`,
-  `missing_dim`, `loading_ring_segments`, `loading_ring_speed` (turns per second, floored
-  at 0.05), `loading_text_gap` (non-negative numbers), and `background_color`,
-  `shadow_color`, `overlay_color`, `loading_ring_color`, `loading_text_color`,
-  `error_border_color`, `error_text_color`, `missing_sign_color` (quoted CSS color
-  strings). Every one of them is handed to the page as a CSS variable.
+  all drops every setting to defaults. Knobs: `show_captions`, `show_console_window`
+  (bool), `border_gap`, `image_gap`, `corner_radius`, `shadow_size`, `shadow_fade`,
+  `error_border_width`, `missing_dim`, `loading_ring_segments`, `loading_ring_speed`
+  (turns per second, floored at 0.05), `loading_text_gap` (non-negative numbers), and
+  `background_color`, `shadow_color`, `overlay_color`, `loading_ring_color`,
+  `loading_text_color`, `error_border_color`, `error_text_color`, `missing_sign_color`
+  (quoted CSS color strings). Every one of them but `show_console_window` is handed to
+  the page as a CSS variable; that one only ever matters to Rust, at the moment a game is
+  spawned (see *Launching a game*).
+
+  A deployed `config.toml` is written once and never rewritten, so a knob added after a
+  cartridge's config existed would otherwise apply its default with nothing in the file
+  to reveal that. `config::sync_defaults()` runs on every startup and appends a
+  commented-out `# key = default` line (with a short description) for any known setting
+  the file doesn't mention — inert until uncommented, so it changes nothing about how the
+  launcher already behaved, only what's discoverable in the file.
 
 ## Role in cartridge identification
 

@@ -44,7 +44,17 @@ pub enum Outcome {
 ///
 /// On success the caller owns the [`Child`] and should hand it to
 /// [`supervise`] on a worker thread — everything from here on blocks.
-pub fn spawn(base: &Path, game: &Game, index: usize) -> Result<Child, String> {
+///
+/// `show_console_window` is `config.toml`'s knob of the same name: a console
+/// program otherwise pops its console window up alongside its real one (or,
+/// for a windowless stand-in, pops up *as* its only window), which is fine
+/// for a real game but ugly for a placeholder cover.
+pub fn spawn(
+    base: &Path,
+    game: &Game,
+    index: usize,
+    show_console_window: bool,
+) -> Result<Child, String> {
     let exe = base.join(&game.exe);
     log::line(base, &format!("launching {} ({})", game.name, exe.display()));
 
@@ -60,12 +70,13 @@ pub fn spawn(base: &Path, game: &Game, index: usize) -> Result<Child, String> {
     let workdir = exe.parent().unwrap_or(base).to_path_buf();
     let (stdout, stderr) = log::game_output(base, game, index);
 
-    match Command::new(&exe)
-        .current_dir(&workdir)
-        .stdout(stdout)
-        .stderr(stderr)
-        .spawn()
-    {
+    let mut command = Command::new(&exe);
+    command.current_dir(&workdir).stdout(stdout).stderr(stderr);
+    if !show_console_window {
+        suppress_console_window(&mut command);
+    }
+
+    match command.spawn() {
         Ok(child) => {
             log::line(
                 base,
@@ -191,6 +202,23 @@ fn wait_for_window(child: &Child) -> Window {
 fn wait_for_window(_child: &Child) -> Window {
     Window::Unsupported
 }
+
+/// Stops a console-subsystem exe from opening a console window of its own. A
+/// GUI game has no console to begin with, so this has no visible effect on
+/// one — only a console program (typically a stand-in cover, since a real
+/// game is GUI) is ever affected.
+#[cfg(windows)]
+fn suppress_console_window(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+
+    // windows_sys::Win32::System::Threading::CREATE_NO_WINDOW, spelled out
+    // rather than pulled in for one flag.
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+fn suppress_console_window(_command: &mut Command) {}
 
 /// Maps an OS spawn error to something worth showing a player. Anything beyond
 /// the two everyday causes points at the log rather than guessing.

@@ -81,6 +81,9 @@ mod trust;
 mod version;
 mod volume;
 
+#[cfg(test)]
+mod tests;
+
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};

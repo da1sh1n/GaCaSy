@@ -140,12 +140,21 @@ pub fn default_secret_key_path() -> PathBuf {
     home.join(".gacasy").join("gacasy.key")
 }
 
-/// Loads and decrypts the secret key.
+/// Loads the secret key, decrypting it only if it is actually encrypted.
 ///
-/// The password comes from the environment or `.env` when set. When it is not,
-/// an unencrypted key is tried first — that is what `keygen` produces when you
-/// give it no password, and prompting for a password that does not exist would
-/// be a small daily lie. Only if that fails are you asked.
+/// The key `keygen` writes by default is unencrypted, and that is the path that
+/// has to need no setup whatsoever: no environment variable, no `.env`, no
+/// prompt. Signing a local build should cost one command.
+///
+/// minisign will not let you ask for that generically. `into_secret_key(None)`
+/// means "decrypt this, prompting if you have to", and it *refuses* a key with
+/// no KDF outright — `SecretKey::from_box_` returns `"Key is not encrypted"`
+/// rather than handing the key back. The unencrypted key has its own entry
+/// point, [`SecretKeyBox::into_unencrypted_secret_key`], so which call to make
+/// is decided by the shape of the key on disk, not by whether we happen to hold
+/// a password.
+///
+/// [`SecretKeyBox::into_unencrypted_secret_key`]: minisign::SecretKeyBox::into_unencrypted_secret_key
 pub fn secret_key(root: &Path) -> Result<minisign::SecretKey, String> {
     let path = secret_key_path(root);
     let text = fs::read_to_string(&path).map_err(|e| {
@@ -156,28 +165,41 @@ pub fn secret_key(root: &Path) -> Result<minisign::SecretKey, String> {
             path.display()
         )
     })?;
-    let boxed = minisign::SecretKeyBox::from_string(&text)
-        .map_err(|e| format!("{} is not a minisign secret key: {e}", path.display()))?;
+    // `SecretKeyBox` is consumed by every conversion, so it is re-parsed per
+    // attempt. Parsing is just a string wrap; the work happens on conversion.
+    let boxed = || {
+        minisign::SecretKeyBox::from_string(&text)
+            .map_err(|e| format!("{} is not a minisign secret key: {e}", path.display()))
+    };
+
+    match boxed()?.into_unencrypted_secret_key() {
+        Ok(key) => return Ok(key),
+        // The only `Verify` error on this path is a checksum mismatch on a key
+        // that really is unencrypted: the file is damaged, not locked, and
+        // asking for a password would send you looking for the wrong problem.
+        Err(e) if matches!(e.kind(), minisign::ErrorKind::Verify) => {
+            return Err(format!(
+                "{} is unencrypted but its checksum does not match — the file is damaged ({e}).",
+                path.display()
+            ));
+        }
+        // Anything else means it carries a KDF: it is encrypted, and needs one.
+        Err(_) => {}
+    }
 
     if let Some(password) = setting(PASSWORD_VAR, &dotenv(root)) {
-        return boxed
+        return boxed()?
             .into_secret_key(Some(password))
             .map_err(|e| format!("could not decrypt {} — wrong {PASSWORD_VAR}? ({e})", path.display()));
     }
 
-    let boxed_again = minisign::SecretKeyBox::from_string(&text).expect("parsed once already");
-    match boxed.into_secret_key(None) {
-        Ok(key) => Ok(key),
-        Err(_) => {
-            eprintln!("{} is password-protected.", path.display());
-            eprintln!("(set {PASSWORD_VAR} in the environment or .env to skip this prompt)");
-            let password = rpassword::prompt_password("password: ")
-                .map_err(|e| format!("could not read the password: {e}"))?;
-            boxed_again
-                .into_secret_key(Some(password))
-                .map_err(|e| format!("could not decrypt {}: {e}", path.display()))
-        }
-    }
+    eprintln!("{} is password-protected.", path.display());
+    eprintln!("(set {PASSWORD_VAR} in the environment or .env to skip this prompt)");
+    let password = rpassword::prompt_password("password: ")
+        .map_err(|e| format!("could not read the password: {e}"))?;
+    boxed()?
+        .into_secret_key(Some(password))
+        .map_err(|e| format!("could not decrypt {}: {e}", path.display()))
 }
 
 /// Creates a signing key, writing the secret outside the repo and its public
@@ -224,12 +246,14 @@ pub fn keygen(root: &Path, release: bool) -> Result<(), String> {
         fs::create_dir_all(parent)
             .map_err(|e| format!("could not create {}: {e}", parent.display()))?;
     }
-    // `to_box` is what encrypts. Passing None here would write the key to disk
-    // in the clear no matter what password was asked for — the generated
-    // KeyPair's `sk` is already decrypted in memory.
+    // `to_box`'s argument is the *untrusted comment* line, not a password —
+    // encryption already happened above, inside `generate_encrypted_keypair`,
+    // and `sk` carries the encrypted key material from that point on. Passing
+    // the password here would write it to disk in the clear, on the comment
+    // line, right above the key it protects.
     let secret_text = pair
         .sk
-        .to_box(password.as_deref())
+        .to_box(None)
         .map_err(|e| format!("could not serialise the secret key: {e}"))?
         .to_string();
     fs::write(&secret_path, secret_text)
@@ -281,7 +305,7 @@ pub fn keygen(root: &Path, release: bool) -> Result<(), String> {
 /// exist yet and `canonicalize` needs something real to resolve. A repo root
 /// that will not canonicalize is not a repo we can reason about, so that fails
 /// closed too.
-fn refuse_inside_repo(root: &Path, secret: &Path) -> Result<(), String> {
+pub(crate) fn refuse_inside_repo(root: &Path, secret: &Path) -> Result<(), String> {
     let parent = secret.parent().unwrap_or(Path::new("."));
     let _ = fs::create_dir_all(parent);
 
@@ -304,69 +328,4 @@ fn refuse_inside_repo(root: &Path, secret: &Path) -> Result<(), String> {
         ));
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn reads_the_key_out_of_a_pub_file() {
-        let text = "untrusted comment: minisign public key A1B2\nRWQf6LRCGA9i53==\n";
-        assert_eq!(base64_line(text), Some("RWQf6LRCGA9i53==".to_string()));
-    }
-
-    #[test]
-    fn survives_a_pub_file_someone_edited() {
-        // No comment line at all, and trailing blank lines.
-        assert_eq!(
-            base64_line("RWQf6LRCGA9i53==\n\n"),
-            Some("RWQf6LRCGA9i53==".to_string())
-        );
-        assert_eq!(base64_line("untrusted comment: only a comment\n"), None);
-        assert_eq!(base64_line(""), None);
-    }
-
-    fn env_from(text: &str) -> HashMap<String, String> {
-        let dir = std::env::temp_dir().join("gacasy-xtask-dotenv");
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).expect("temp dir");
-        fs::write(dir.join(".env"), text).expect("write .env");
-        dotenv(&dir)
-    }
-
-    #[test]
-    fn parses_the_env_shapes_that_actually_occur() {
-        let env = env_from(
-            "# a comment\n\
-             \n\
-             GACASY_SIGNING_KEY=C:\\keys\\gacasy.key\n\
-             GACASY_SIGNING_PASSWORD = \"hunter2\"\n\
-             QUOTED='single'\n",
-        );
-        assert_eq!(env["GACASY_SIGNING_KEY"], "C:\\keys\\gacasy.key");
-        assert_eq!(env["GACASY_SIGNING_PASSWORD"], "hunter2");
-        assert_eq!(env["QUOTED"], "single");
-        assert_eq!(env.len(), 3);
-    }
-
-    #[test]
-    fn a_missing_env_file_is_not_an_error() {
-        assert!(dotenv(Path::new("/nowhere/at/all")).is_empty());
-    }
-
-    #[test]
-    fn a_secret_key_inside_the_repo_is_refused() {
-        // The mistake this exists to stop: putting the key next to its public
-        // half, where the next `git add -A` picks it up.
-        let root = std::env::temp_dir().join("gacasy-xtask-repo");
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(root.join("keys")).expect("temp repo");
-
-        let inside = root.join("keys").join("gacasy.key");
-        assert!(refuse_inside_repo(&root, &inside).is_err());
-
-        let outside = std::env::temp_dir().join("gacasy-xtask-elsewhere").join("gacasy.key");
-        assert!(refuse_inside_repo(&root, &outside).is_ok());
-    }
 }

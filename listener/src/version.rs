@@ -35,7 +35,7 @@ use std::time::{Duration, Instant};
 /// print a string and exit — and bounded because the Windows listener asks from
 /// its message-pump thread, where an unbounded wait would freeze every later
 /// device event behind one wedged binary.
-const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+pub(crate) const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// How often to check whether it has exited. `wait_timeout` is not in std, and
 /// polling is both portable and cheap at this granularity.
@@ -113,7 +113,7 @@ pub fn probe(exe: &Path) -> Option<Version> {
 /// Split out from [`probe`] so the giving-up path can be tested with a process
 /// chosen to never answer — the case that matters most here, since it is the one
 /// that would otherwise wedge the Windows message pump.
-fn answer(mut child: std::process::Child, timeout: Duration) -> Option<Version> {
+pub(crate) fn answer(mut child: std::process::Child, timeout: Duration) -> Option<Version> {
     let deadline = Instant::now() + timeout;
     loop {
         match child.try_wait() {
@@ -138,100 +138,4 @@ fn answer(mut child: std::process::Child, timeout: Duration) -> Option<Version> 
         stdout.read_to_string(&mut output).ok()?;
     }
     parse(output.lines().next()?)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_a_bare_version() {
-        assert_eq!(
-            parse("0.2.0"),
-            Some(Version {
-                major: 0,
-                minor: 2,
-                patch: 0
-            })
-        );
-        assert_eq!(parse("  12.3.45  \r\n").map(|v| v.major), Some(12));
-    }
-
-    #[test]
-    fn refuses_anything_that_is_not_three_numbers() {
-        // The shapes a well-meaning change might introduce. Each would be a
-        // guess about what the launcher meant, so each is refused.
-        assert_eq!(parse("gacasy-launcher 0.2.0"), None);
-        assert_eq!(parse("0.2"), None);
-        assert_eq!(parse("0.2.0.1"), None);
-        assert_eq!(parse("0.2.0-rc1"), None);
-        assert_eq!(parse("v0.2.0"), None);
-        assert_eq!(parse(""), None);
-        assert_eq!(parse("not a version"), None);
-    }
-
-    #[test]
-    fn our_own_version_parses() {
-        // If this fails, `--version` is printing something the listener on the
-        // other side of a probe could not read.
-        let own = own();
-        assert_eq!(parse(&own.to_string()), Some(own));
-    }
-
-    /// Spawns something that will not answer for a long time.
-    fn a_process_that_never_answers() -> std::process::Child {
-        let mut command = if cfg!(windows) {
-            // -t pings until killed, and unlike most commands it ignores stdin
-            // entirely, so closing stdin cannot end it early.
-            let mut c = Command::new("ping");
-            c.args(["-t", "127.0.0.1"]);
-            c
-        } else {
-            let mut c = Command::new("sleep");
-            c.arg("30");
-            c
-        };
-        command
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("spawn a blocking process")
-    }
-
-    #[test]
-    fn a_launcher_that_never_answers_is_given_up_on_and_killed() {
-        // The failure this prevents: the Windows listener asks from the thread
-        // blocked in GetMessage, so an unbounded wait here would freeze every
-        // later device arrival behind one wedged binary.
-        let started = Instant::now();
-        assert_eq!(answer(a_process_that_never_answers(), Duration::from_millis(150)), None);
-        assert!(
-            started.elapsed() < Duration::from_secs(5),
-            "gave up after {:?}, which is not giving up",
-            started.elapsed()
-        );
-    }
-
-    #[test]
-    fn a_binary_that_answers_with_junk_is_not_a_version() {
-        // Exits promptly, prints something that is not an x.y.z.
-        let child = Command::new(if cfg!(windows) { "cmd" } else { "echo" })
-            .args(if cfg!(windows) {
-                vec!["/C", "echo hello"]
-            } else {
-                vec!["hello"]
-            })
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("spawn");
-        assert_eq!(answer(child, PROBE_TIMEOUT), None);
-    }
-
-    #[test]
-    fn a_binary_that_does_not_exist_is_not_a_version() {
-        assert_eq!(probe(Path::new("./no-such-launcher-anywhere")), None);
-    }
 }

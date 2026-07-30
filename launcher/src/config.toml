@@ -6,6 +6,10 @@
 #
 # On a real cartridge there is no src/, and this file is written once if
 # missing and never touched again: whoever owns the cartridge owns its config.
+# The one exception is a setting that didn't exist when the file was first
+# written — the launcher appends a commented-out line for it (already at its
+# default) so it's there to find and uncomment, instead of silently applying
+# with no trace of it in the file.
 #
 # The window wraps the covers: each cover aims for a fraction of your display
 # and the window is sized around the row of them, bounded by two caps. All
@@ -82,3 +86,9 @@ error_text_color = "#e0b13a"
 # missing_sign_color; it can't be chosen.
 missing_sign_color = "#d13a3a"
 missing_dim = 0.45
+
+# A console-mode game (or a windowless stand-in cover) normally pops its own
+# console window up when it starts. Off by default so that stays hidden; a
+# real GUI game is unaffected either way, since it has no console to begin
+# with.
+show_console_window = false

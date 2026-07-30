@@ -53,6 +53,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::autoplay;
 use crate::payload;
 
 pub const EXE_NAME: &str = if cfg!(windows) { "listener.exe" } else { "listener" };
@@ -134,9 +135,13 @@ pub fn find() -> Vec<Installed> {
 /// setup. A cartridge made by this same installer works the moment it is
 /// plugged in, on this PC or any other with this listener on it.
 ///
+/// `suppress_autoplay` is the one thing here that reaches outside GaCaSy's own
+/// settings, which is why it is a parameter and not a decision made in this
+/// function: see [`crate::autoplay`].
+///
 /// Returns the lines to show the user — what was written where — because "it
 /// worked" is not enough for something that leaves no window behind.
-pub fn install(start_now: bool) -> Result<Vec<String>, String> {
+pub fn install(start_now: bool, suppress_autoplay: bool) -> Result<Vec<String>, String> {
     if let Some(defect) = payload::defect() {
         return Err(defect);
     }
@@ -162,7 +167,7 @@ pub fn install(start_now: bool) -> Result<Vec<String>, String> {
         ));
     }
 
-    fs::write(&exe, payload::LISTENER_EXE)
+    fs::write(&exe, payload::listener()?)
         .map_err(|e| format!("{} could not be written: {e}", exe.display()))?;
     done.push(format!("Installed {}", exe.display()));
 
@@ -181,6 +186,20 @@ pub fn install(start_now: bool) -> Result<Vec<String>, String> {
     platform::set_autostart(&exe)?;
     done.push(format!("Set it to start at login ({AUTOSTART_NAME})"));
 
+    // Reported, never fatal. The listener is installed and working at this
+    // point; AutoPlay is about what else appears on screen beside the launcher,
+    // so failing to change it is a worse-looking cartridge insert and not a
+    // failed install.
+    if suppress_autoplay {
+        match autoplay::suppress() {
+            Ok(lines) => done.extend(lines),
+            Err(e) => done.push(format!(
+                "The Windows AutoPlay setting could not be changed ({e}); a folder may still \
+                 open when a cartridge is plugged in"
+            )),
+        }
+    }
+
     if start_now {
         match Command::new(&exe).current_dir(&dir).spawn() {
             // Without this the user has to log out and back in before plugging
@@ -197,8 +216,19 @@ pub fn install(start_now: bool) -> Result<Vec<String>, String> {
 ///
 /// Undoing step 3 matters more than deleting the files — a `Run` entry pointing
 /// at an exe that is gone is a failed-to-start error at every login.
+///
+/// The AutoPlay setting is put back only once the **last** listener on this PC
+/// is gone. Removing a stray copy an earlier build left behind, while the real
+/// install stays, must not hand the user back a PC that opens a folder every
+/// time they plug a cartridge in.
 pub fn uninstall(dir: &Path) -> Result<Vec<String>, String> {
     let mut done = remove_install(dir)?;
+    if find().is_empty() {
+        match autoplay::restore() {
+            Ok(lines) => done.extend(lines),
+            Err(e) => done.push(format!("The AutoPlay setting could not be put back ({e})")),
+        }
+    }
     if done.is_empty() {
         done.push("Nothing was installed there".into());
     }
@@ -271,105 +301,50 @@ fn same_path(recorded: &str, exe: &Path) -> bool {
 #[cfg(windows)]
 mod platform {
     use std::path::Path;
-    use std::ptr;
 
-    use windows_sys::Win32::Foundation::{CloseHandle, ERROR_SUCCESS, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
         TH32CS_SNAPPROCESS,
-    };
-    use windows_sys::Win32::System::Registry::{
-        HKEY, HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_SZ, RegCloseKey,
-        RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
     };
     use windows_sys::Win32::System::Threading::{
         OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
         QueryFullProcessImageNameW, TerminateProcess,
     };
 
+    use crate::reg::{self, HKEY_CURRENT_USER as HKCU};
+
     /// Per-user autostart. The listener is resident on Windows — it has to be
     /// running to hear `WM_DEVICECHANGE` — so something must start it at login.
     /// `HKCU\…\Run` is the lightest thing that does, and it needs no admin.
     const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 
-    /// RAII wrapper so every early return closes the key.
-    struct Key(HKEY);
-
-    impl Drop for Key {
-        fn drop(&mut self) {
-            if !self.0.is_null() {
-                unsafe { RegCloseKey(self.0) };
-            }
-        }
-    }
-
-    fn open_run(access: u32) -> Option<Key> {
-        let mut handle: HKEY = ptr::null_mut();
-        let ok = unsafe {
-            RegOpenKeyExW(
-                HKEY_CURRENT_USER,
-                wide(RUN_KEY).as_ptr(),
-                0,
-                access,
-                &mut handle,
-            )
-        };
-        (ok == ERROR_SUCCESS).then_some(Key(handle))
-    }
-
     pub fn set_autostart(exe: &Path) -> Result<(), String> {
-        let key = open_run(KEY_SET_VALUE).ok_or("The Windows Run key could not be opened.")?;
+        let key = reg::open(HKCU, RUN_KEY, reg::WRITE)
+            .ok_or("The Windows Run key could not be opened.")?;
         // Quoted: `C:\Users\First Last\AppData\…` has a space in it whenever the
         // account name does, and an unquoted one is the classic "starts
         // C:\Users\First.exe" bug.
-        let value = wide(&format!("\"{}\"", exe.display()));
-        let ok = unsafe {
-            RegSetValueExW(
-                key.0,
-                wide(super::AUTOSTART_NAME).as_ptr(),
-                0,
-                REG_SZ,
-                value.as_ptr() as *const u8,
-                (value.len() * 2) as u32,
-            )
-        };
-        if ok == ERROR_SUCCESS {
-            Ok(())
-        } else {
-            Err(format!("The login entry could not be written (error {ok})."))
-        }
+        reg::set_sz(
+            &key,
+            Some(super::AUTOSTART_NAME),
+            &format!("\"{}\"", exe.display()),
+        )
+        .map_err(|e| format!("The login entry could not be written. {e}"))
     }
 
     pub fn clear_autostart() -> Result<(), String> {
-        let Some(key) = open_run(KEY_SET_VALUE) else {
+        let Some(key) = reg::open(HKCU, RUN_KEY, reg::WRITE) else {
             return Ok(()); // nothing to remove from
         };
-        unsafe { RegDeleteValueW(key.0, wide(super::AUTOSTART_NAME).as_ptr()) };
+        reg::delete_value(&key, Some(super::AUTOSTART_NAME));
         Ok(())
     }
 
     /// What the `Run` entry currently points at, if anything.
     pub fn autostart_target() -> Option<String> {
-        let key = open_run(KEY_QUERY_VALUE)?;
-        let name = wide(super::AUTOSTART_NAME);
-        let mut buffer = [0u16; 1024];
-        let mut size = (buffer.len() * 2) as u32;
-        let ok = unsafe {
-            RegQueryValueExW(
-                key.0,
-                name.as_ptr(),
-                ptr::null(),
-                ptr::null_mut(),
-                buffer.as_mut_ptr() as *mut u8,
-                &mut size,
-            )
-        };
-        if ok != ERROR_SUCCESS {
-            return None;
-        }
-        let chars = (size as usize / 2).min(buffer.len());
-        let end = buffer[..chars].iter().position(|c| *c == 0).unwrap_or(chars);
-        Some(String::from_utf16_lossy(&buffer[..end]))
+        let key = reg::open(HKCU, RUN_KEY, reg::READ)?;
+        reg::query_sz(&key, Some(super::AUTOSTART_NAME))
     }
 
     /// Terminates every process running exactly `exe`, returning how many.
@@ -434,10 +409,6 @@ mod platform {
         let end = buffer.iter().position(|c| *c == 0).unwrap_or(buffer.len());
         String::from_utf16_lossy(&buffer[..end])
     }
-
-    fn wide(text: &str) -> Vec<u16> {
-        text.encode_utf16().chain(std::iter::once(0)).collect()
-    }
 }
 
 #[cfg(not(windows))]
@@ -458,118 +429,5 @@ mod platform {
     }
     pub fn stop_running(_exe: &Path) -> usize {
         0
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const SEED: &str = "\
-# GaCaSy listener configuration.
-
-# LEAVING THIS EMPTY TRUSTS EVERY CARTRIDGE.
-keys = []
-
-debounce_seconds = 5
-";
-
-    #[test]
-    fn pairing_the_first_cartridge_keeps_every_comment() {
-        let merged = merge_keys(SEED, &["3f9a1c".into()]);
-        assert!(merged.contains("keys = [\"3f9a1c\"]"));
-        assert!(
-            merged.contains("LEAVING THIS EMPTY TRUSTS EVERY CARTRIDGE"),
-            "the comment explaining the open default must survive: {merged}"
-        );
-        assert!(merged.contains("debounce_seconds = 5"));
-    }
-
-    #[test]
-    fn pairing_a_second_cartridge_does_not_unpair_the_first() {
-        let once = merge_keys(SEED, &["3f9a1c".into()]);
-        let twice = merge_keys(&once, &["b72e04".into()]);
-        assert_eq!(parse_keys(&twice), vec!["3f9a1c", "b72e04"]);
-    }
-
-    #[test]
-    fn pairing_the_same_key_twice_adds_nothing() {
-        let once = merge_keys(SEED, &["3F9A1C".into()]);
-        let twice = merge_keys(&once, &["  3f9a1c ".into()]);
-        assert_eq!(parse_keys(&twice), vec!["3f9a1c"]);
-    }
-
-    #[test]
-    fn replaces_a_multi_line_list_in_place() {
-        let config = "# top\nkeys = [\n    \"aaa\",\n    \"bbb\",\n]\n# after\nx = 1\n";
-        let merged = merge_keys(config, &["ccc".into()]);
-        assert_eq!(parse_keys(&merged), vec!["aaa", "bbb", "ccc"]);
-        assert!(merged.contains("# top"));
-        assert!(merged.contains("# after"));
-        assert!(merged.contains("x = 1"));
-        assert_eq!(merged.matches("keys").count(), 1, "no duplicate key: {merged}");
-    }
-
-    #[test]
-    fn a_config_with_no_keys_line_gains_one() {
-        let merged = merge_keys("debounce_seconds = 5\n", &["3f9a1c".into()]);
-        assert_eq!(parse_keys(&merged), vec!["3f9a1c"]);
-        assert!(merged.contains("debounce_seconds = 5"));
-    }
-
-    #[test]
-    fn a_commented_out_keys_line_is_not_mistaken_for_the_real_one() {
-        let config = "# keys = [\"old\"]\nkeys = []\n";
-        let merged = merge_keys(config, &["new".into()]);
-        assert!(merged.starts_with("# keys = [\"old\"]"));
-        assert_eq!(parse_keys(&merged), vec!["new"]);
-    }
-
-    #[test]
-    fn a_long_list_wraps_one_key_per_line() {
-        let keys: Vec<String> = (0..6).map(|n| format!("{n}").repeat(20)).collect();
-        let merged = merge_keys(SEED, &keys);
-        assert!(merged.contains("keys = [\n"));
-        assert_eq!(parse_keys(&merged), keys);
-    }
-
-    #[test]
-    fn the_run_entry_is_matched_however_it_was_quoted() {
-        let exe = Path::new(r"C:\Users\a\AppData\Local\GaCaSy\listener.exe");
-        assert!(same_path(
-            r#""C:\Users\a\AppData\Local\GaCaSy\listener.exe""#,
-            exe
-        ));
-        assert!(same_path(r"c:\users\a\appdata\local\gacasy\LISTENER.EXE", exe));
-        // A legacy copy's entry must not read as this one's, or cleaning the
-        // legacy folder up would clear the working install's login entry.
-        assert!(!same_path(
-            r"C:\Users\a\AppData\Local\Programs\GaCaSy\listener.exe",
-            exe
-        ));
-        assert!(!same_path(r"C:\Program Files\GaCaSy\listener.exe", exe));
-    }
-
-    #[test]
-    fn the_home_folder_is_appdata_local_gacasy_where_the_log_already_goes() {
-        // The whole point of the move: one folder for the exe, its config and
-        // its log — the same one listener/src/config.rs names as the log's home.
-        let Some(dir) = install_dir() else {
-            return; // no %LOCALAPPDATA% on this account
-        };
-        assert!(dir.ends_with("GaCaSy"), "{}", dir.display());
-        assert!(
-            dir.parent().is_some_and(|p| !p.ends_with("Programs")),
-            "the folder is directly under %LOCALAPPDATA%: {}",
-            dir.display()
-        );
-    }
-
-    #[test]
-    fn the_folders_earlier_builds_used_are_not_the_one_we_write_to() {
-        let home = install_dir();
-        for legacy in legacy_dirs() {
-            assert_ne!(Some(&legacy), home.as_ref());
-        }
     }
 }

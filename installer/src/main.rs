@@ -32,7 +32,10 @@
 // The source is split by job:
 //
 //   app.rs        wizard state, and the create-vs-edit routing rule
-//   ui/           the screens; ui/mod.rs holds the shell and the only footer
+//   ui/           the screens; ui/mod.rs holds the frame and the only footer
+//   shell.rs      the window, the GL context and the event loop under it
+//   font.rs       the desktop's own UI font, read off the disk
+//   clipboard.rs  copy and paste for the one field that has any
 //   work.rs       the worker thread, and how the UI hears from it
 //   payload.rs    the embedded launcher, listener and seed files
 //   volume.rs     which drives can be cartridges, and which already are
@@ -46,7 +49,9 @@
 //
 // This is egui rather than a webview, unlike the launcher: a WebView2-based
 // installer that found the runtime missing would have no way to bootstrap
-// itself with no internet.
+// itself with no internet. It is egui *without* `eframe`, and without an
+// embedded typeface, because this is the one file a user downloads and both
+// cost more than they are worth here — see shell.rs and font.rs.
 //
 // It asks for **no elevation**, and carries no code that could. Writing a
 // cartridge never needed it, and the listener has exactly one home —
@@ -61,21 +66,27 @@
 #![windows_subsystem = "windows"]
 
 mod app;
+mod autoplay;
 mod cartridge;
 mod catalog;
+mod clipboard;
 mod copy;
 mod detect;
+mod font;
 mod image;
 mod listener;
 mod payload;
+mod reg;
+mod shell;
 mod ui;
 mod version;
 mod volume;
 mod work;
 
-use eframe::egui;
+#[cfg(test)]
+mod tests;
 
-fn main() -> eframe::Result {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Before the window, before anything. Same rule as the other two: being
     // asked a question is not a reason to start doing work.
     if version::handled() {
@@ -93,27 +104,6 @@ fn main() -> eframe::Result {
         );
     }
 
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("GaCaSy Installer")
-            .with_inner_size([920.0, 660.0])
-            .with_min_inner_size([760.0, 520.0]),
-        ..Default::default()
-    };
-
-    eframe::run_native(
-        "GaCaSy Installer",
-        options,
-        Box::new(|cc| {
-            // A shade larger than egui's default. This is a wizard read once by
-            // someone who has never seen it, not a tool used daily.
-            cc.egui_ctx.all_styles_mut(|style| {
-                for (_, font) in style.text_styles.iter_mut() {
-                    font.size *= 1.15;
-                }
-                style.spacing.item_spacing = egui::vec2(8.0, 6.0);
-            });
-            Ok(Box::new(app::App::new()))
-        }),
-    )
+    shell::run(app::App::new())?;
+    Ok(())
 }

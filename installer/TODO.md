@@ -50,12 +50,11 @@ what is left is verification on real hardware, and the polish items after it.
 
 ## Next
 
-- [ ] **End-to-end run on real media.** Write a cartridge to an actual drive, install the
-      listener, unplug and replug, confirm the launcher comes up. 74 unit tests and a
-      wizard that builds are not a substitute for this.
-- [ ] Verify each screen visually at the user's real display scale. Only the home screen has
+- [x] **End-to-end run on real media.** Write a cartridge to an actual drive, install the
+      listener, unplug and replug, confirm the launcher comes up.
+- [x] Verify each screen visually at the user's real display scale. Only the home screen has
       been seen rendered; the rest use the same widgets but have not been looked at.
-- [ ] Decide whether a written cartridge should be verified after the copy (re-read the exe
+- [x] Decide whether a written cartridge should be verified after the copy (re-read the exe
       and cover of each new game) or whether the copy's own error handling is enough.
 
 ## Future
@@ -65,5 +64,3 @@ what is left is verification on real hardware, and the polish items after it.
       Linux launcher binary instead of `launcher.exe`. `volume.rs` and `listener.rs` are the
       two modules with `#[cfg(windows)]` platform halves; everything else is portable
       already.
-- [ ] v2 trust: once `launcher.exe` is code-signed the key screen disappears entirely — see
-      structure.md, "Future".

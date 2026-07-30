@@ -84,7 +84,27 @@ fn main() {
     rust.push_str("];\n");
 
     fs::write(out.join("trust_anchors.rs"), rust).expect("write trust_anchors.rs");
+
+    embed_resources();
 }
+
+/// Compiles `assets/listener.ico` and a version block into the exe.
+///
+/// The icon is what `LoadIconW` in `trigger/windows.rs` pulls the tray icon
+/// from, and the version block's `FileDescription` is what Task Manager shows
+/// instead of the bare filename — both come from the same resource, built
+/// once here rather than requiring a `.rc` file of our own.
+#[cfg(windows)]
+fn embed_resources() {
+    let mut res = winres::WindowsResource::new();
+    res.set_icon("assets/listener.ico");
+    res.set("FileDescription", "GaCaSy Listener");
+    res.set("ProductName", "GaCaSy");
+    res.compile().expect("compile Windows resources (icon, version info)");
+}
+
+#[cfg(not(windows))]
+fn embed_resources() {}
 
 /// Pulls the key out of a minisign `.pub` file.
 ///

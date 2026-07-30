@@ -45,3 +45,26 @@ project_version = 0
 # still runs from anywhere in the workspace as `cargo run -p xtask -- …`.
 # sigblock is in, because both shipped programs link it.
 default-members = ["launcher", "listener", "sigblock"]
+
+# What ships. Cargo's stock `release` profile optimizes each crate on its own
+# and then links the pieces, which for a GUI binary leaves a lot of code nothing
+# ever calls — the installer statically links all of egui and its GL backend,
+# and the installer is the one file a user downloads over a home connection, so
+# its size is a feature.
+[profile.release]
+# Optimize for size rather than speed. None of these three programs has any
+# throughput to lose: the installer is a wizard redrawing a static screen, the
+# listener sleeps until a drive appears, and the launcher is a webview. What they
+# do have is a download, and `3` spends bytes on unrolling and inlining that
+# nothing here can use.
+opt-level = "s"
+# Optimize across crate boundaries, not just within them. This is what lets the
+# linker see that most of egui/glow is unreachable from this app and drop it.
+lto = "fat"
+# One codegen unit per crate graph, so LTO has the whole picture. Slower builds;
+# this profile is only ever used by a release.
+codegen-units = 1
+# No unwind tables and no landing pads. Nothing here catches a panic — every
+# program in the workspace treats one as a bug and dies — so the machinery to
+# unwind past it is pure weight.
+panic = "abort"

@@ -75,6 +75,9 @@ mod ui;
 mod version;
 mod window;
 
+#[cfg(test)]
+mod tests;
+
 fn main() -> wry::Result<()> {
     // First, before anything touches the disk. The listener asks a verified
     // launcher for its version, and a launcher that seeded folders or rewrote

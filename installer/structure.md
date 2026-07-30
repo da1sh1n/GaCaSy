@@ -164,12 +164,40 @@ Installing the listener (job 2) is independent of both and can be run on its own
 1. **Pick the target volume — external drives only.** See
    [Which drives are offered](#which-drives-are-offered). A volume that already carries a
    launcher routes to [job 3](#job-3--edit-an-existing-cartridge); one without lands here.
-2. **Choose the key.** Required before installation can start — see [Keys](#keys).
+2. **Name the cartridge.** See [Naming a cartridge](#naming-a-cartridge). Seeded with the name
+   the drive already has, so this is a step you can walk straight past.
 3. **Add games.** The user picks one or more game folders.
 4. **Per game:** auto-find the executable (below), then pick a cover image.
 5. **Review**, check free space, then copy — with a progress bar on a worker thread. Game
    folders run to many GB; the UI must stay responsive and the copy must be cancellable.
-6. **Write the cartridge layout.**
+6. **Write the cartridge layout**, then set the drive's name.
+
+There is no key step. A cartridge's identity is the signature inside the `launcher.exe` the
+installer carries, so there is nothing for the user to choose or keep in step.
+
+### Naming a cartridge
+
+A cartridge's name is the drive's **volume label**, and it is the only part of a cartridge that
+is not a file on it. There is nowhere else for it to live: `config.toml` is look and feel,
+`catalog.json` is the game list, and identity is a signature inside `launcher.exe`. So the
+label is the whole of it — read for the picker's summary line, written by `volume::set_label`.
+
+Two things follow from putting it in the plan rather than applying it on the keystroke:
+
+- **A rename alone is a plan worth running.** `Plan::is_empty` counts the label, so a cartridge
+  can be renamed without also adding or removing a game.
+- **It is written last — after `launcher.exe`.** A cancelled or failed run never reaches it,
+  which is what keeps "the cartridge is as it was" literally true of a cancel, and it means the
+  rename needs no rollback entry. A rename that fails on its own comes back as a *warning* on
+  the Done screen, not an error: the cartridge was written correctly, and reporting otherwise
+  would say a working cartridge doesn't work.
+
+What a label may contain is a property of the filesystem and nothing else — 32 characters on
+NTFS, 11 on the FAT family, which also refuses `* ? / \ | . , ; : + = [ ] < > "`. That is
+checked when the plan is built rather than at the write, so a name that was never going to land
+stops the Review button instead of the last step of a copy that has already run for minutes. An
+unrecognised filesystem is given the larger limit: Windows is the authority at the moment of
+writing, and guessing low would refuse names that would have worked.
 
 ### Which drives are offered
 
@@ -216,12 +244,17 @@ If the bus query fails outright, the fallback is Windows' own coarse answer take
 conservatively: only a drive Windows itself calls *removable* gets through, so an
 unidentifiable fixed disk is refused rather than guessed at.
 
-Refused drives are still **listed**, greyed out, under a "Not usable" heading with the reason
-beside them. A filter that silently shortens a list is indistinguishable from a bug to the
-person looking at it, and "why isn't my D: drive here?" is a question the screen should answer
-by itself. Network shares, optical drives and RAM disks are the exception — they are dropped
-entirely, since there is nothing useful to say about them and probing a stale network mount
-can block for a long time.
+Refused drives are **not listed at all**. `volume::list()` returns only the ones that can be
+picked; `volume::all()` is the unfiltered view, kept for the tests that check a drive is
+refused for the right *reason* rather than merely absent.
+
+They used to be listed, greyed out, under a "Not usable" heading with the reason beside them —
+on the grounds that a filter which silently shortens a list is indistinguishable from a bug to
+the person looking at it. That reasoning was right about the risk and wrong about the remedy:
+on a normal PC it filled the picker with `C:` and every internal disk, rows that existed only
+to say no. The screen answers "why isn't my D: drive here?" in one line of prose above the
+list instead, once rather than once per drive. Network shares, optical drives and RAM disks
+never reach either function — probing a stale network mount can block for a long time.
 
 The check runs at **three** points, because the list can go stale under a click — an external
 drive unplugged, its letter picked up by something internal: the picker won't offer it,
@@ -235,13 +268,19 @@ Matches the launcher's deployed layout
 
 ```text
 <volume>/
-  launcher.exe     <- the app, from the embedded payload
-  config.toml      <- look and feel only; the key is not here
+  launcher.exe     <- the app, from the embedded payload; the signature rides inside it
+  config.toml      <- look and feel only
   catalog.json     <- the game list the installer just built
   images/          <- one cover per game
   games/           <- the copied game installs
-  .cartridge       <- identity marker at the volume root
 ```
+
+There is **no identity file**. What makes this a cartridge is the minisign signature carried
+inside `launcher.exe`, which the listener checks against a key compiled into itself — the
+`.cartridge` marker that used to sit at the volume root is gone.
+
+One part of a cartridge is not in this layout at all: its **name**, which is the drive's volume
+label. See [Naming a cartridge](#naming-a-cartridge).
 
 `EBWebView/` is **not** created by the installer — the launcher makes it on first run.
 

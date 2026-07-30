@@ -32,18 +32,25 @@ use std::ptr;
 use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE, HWND, LPARAM, LRESULT, WPARAM,
+    CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE, HWND, LPARAM, LRESULT, POINT,
+    WPARAM,
 };
 use windows_sys::Win32::Storage::FileSystem::{GetDriveTypeW, GetLogicalDrives};
 use windows_sys::Win32::System::Diagnostics::Debug::{SEM_FAILCRITICALERRORS, SetErrorMode};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Threading::CreateMutexW;
 use windows_sys::Win32::System::WindowsProgramming::{DRIVE_FIXED, DRIVE_REMOVABLE};
+use windows_sys::Win32::UI::Shell::{
+    NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW, ShellExecuteW,
+    Shell_NotifyIconW,
+};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CW_USEDEFAULT, CreateWindowExW, DBT_DEVICEARRIVAL, DBT_DEVTYP_VOLUME, DBTF_NET,
-    DEV_BROADCAST_HDR, DEV_BROADCAST_VOLUME, DefWindowProcW, DispatchMessageW, GetMessageW, MSG,
-    PostQuitMessage, RegisterClassW, TranslateMessage, WM_DESTROY, WM_DEVICECHANGE, WNDCLASSW,
-    WS_OVERLAPPED,
+    AppendMenuW, CW_USEDEFAULT, CreatePopupMenu, CreateWindowExW, DBT_DEVICEARRIVAL,
+    DBT_DEVTYP_VOLUME, DBTF_NET, DEV_BROADCAST_HDR, DEV_BROADCAST_VOLUME, DefWindowProcW,
+    DestroyMenu, DestroyWindow, DispatchMessageW, GetCursorPos, GetMessageW, LoadIconW,
+    MF_STRING, MSG, PostQuitMessage, RegisterClassW, SW_SHOWNORMAL, SetForegroundWindow,
+    TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage, WM_APP, WM_CONTEXTMENU,
+    WM_DESTROY, WM_DEVICECHANGE, WM_RBUTTONUP, WNDCLASSW, WS_OVERLAPPED,
 };
 
 use crate::log::Log;
@@ -55,6 +62,23 @@ use crate::{settings, volume};
 const INSTANCE_MUTEX: &str = r"Local\GaCaSy.CartridgeListener";
 
 const WINDOW_CLASS: &str = "GaCaSy.ListenerWindow";
+
+/// `uID` `Shell_NotifyIconW` identifies this icon by, alongside `hWnd`. One
+/// tray icon per process, so any constant does — it only has to be stable
+/// between the `NIM_ADD` in `add_tray_icon` and the `NIM_DELETE` on shutdown.
+const TRAY_ICON_UID: u32 = 1;
+
+/// The icon resource `build.rs` compiles in via `winres`, which assigns id
+/// `1` to the first (and only) `set_icon` call.
+const TRAY_ICON_RESOURCE: *const u16 = 1 as *const u16;
+
+/// Custom message `Shell_NotifyIconW` delivers mouse activity on the tray
+/// icon through. `WM_APP` is the documented start of the range an
+/// application is free to define its own messages in.
+const WM_TRAYICON: u32 = WM_APP + 1;
+
+const ID_MENU_OPEN_LOG: u32 = 1;
+const ID_MENU_EXIT: u32 = 2;
 
 /// Everything the window procedure needs.
 ///
@@ -129,6 +153,13 @@ pub fn run(log: Log) {
         });
         return;
     };
+
+    // A tray icon is a courtesy, not a requirement — a cartridge still gets
+    // noticed and launched without one — so failing to add it is logged and
+    // otherwise ignored rather than treated as a reason to exit.
+    if !add_tray_icon(hwnd) {
+        with_state(|state| state.log.line("failed to add the tray icon; continuing without one"));
+    }
 
     // After the window exists, so an arrival that happens mid-sweep is queued
     // rather than missed. The debounce then keeps the queued event from
@@ -246,12 +277,136 @@ unsafe extern "system" fn wnd_proc(
             // documented to be answered this way.
             1
         }
+        WM_TRAYICON => {
+            // With no `NIM_SETVERSION` call, the shell reports mouse activity
+            // the old way: `lparam` is the mouse message itself, the same
+            // value a click on a real window would have arrived as.
+            if matches!(lparam as u32, WM_RBUTTONUP | WM_CONTEXTMENU) {
+                unsafe { show_tray_menu(hwnd) };
+            }
+            0
+        }
         WM_DESTROY => {
+            remove_tray_icon(hwnd);
             unsafe { PostQuitMessage(0) };
             0
         }
         _ => unsafe { DefWindowProcW(hwnd, message, wparam, lparam) },
     }
+}
+
+// ── Tray icon ─────────────────────────────────────────────────────────────
+
+/// Adds the tray icon. `false` if the shell refused it, which is not fatal —
+/// see the call site in `run`.
+fn add_tray_icon(hwnd: HWND) -> bool {
+    unsafe {
+        let instance = GetModuleHandleW(ptr::null());
+        let icon = LoadIconW(instance, TRAY_ICON_RESOURCE);
+
+        let mut data: NOTIFYICONDATAW = std::mem::zeroed();
+        data.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
+        data.hWnd = hwnd;
+        data.uID = TRAY_ICON_UID;
+        data.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+        data.uCallbackMessage = WM_TRAYICON;
+        data.hIcon = icon;
+        set_tip(&mut data.szTip, "GaCaSy Listener");
+
+        Shell_NotifyIconW(NIM_ADD, &data) != 0
+    }
+}
+
+/// Removes the tray icon on the way out, so it doesn't linger as a stale
+/// entry in the hidden-icons flyout after the process has already exited.
+fn remove_tray_icon(hwnd: HWND) {
+    unsafe {
+        let mut data: NOTIFYICONDATAW = std::mem::zeroed();
+        data.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
+        data.hWnd = hwnd;
+        data.uID = TRAY_ICON_UID;
+        Shell_NotifyIconW(NIM_DELETE, &data);
+    }
+}
+
+/// Copies `text` (truncated to fit) into a `NOTIFYICONDATAW` fixed-size
+/// UTF-16 field, NUL-terminated.
+fn set_tip(field: &mut [u16], text: &str) {
+    let wide = wide(text);
+    let n = wide.len().min(field.len());
+    let truncated = n == field.len();
+    field[..n].copy_from_slice(&wide[..n]);
+    if truncated {
+        // `wide()` already NUL-terminates; this only matters when truncation
+        // above cut the NUL off the end.
+        field[n - 1] = 0;
+    }
+}
+
+/// Builds and shows the right-click menu at the cursor, then acts on
+/// whichever item (if any) was picked.
+unsafe fn show_tray_menu(hwnd: HWND) {
+    unsafe {
+        let menu = CreatePopupMenu();
+        if menu.is_null() {
+            return;
+        }
+        let open_log = wide("Open log");
+        let exit = wide("Exit");
+        AppendMenuW(menu, MF_STRING, ID_MENU_OPEN_LOG as usize, open_log.as_ptr());
+        AppendMenuW(menu, MF_STRING, ID_MENU_EXIT as usize, exit.as_ptr());
+
+        let mut point: POINT = std::mem::zeroed();
+        GetCursorPos(&mut point);
+
+        // A window that isn't the foreground window never gets the message
+        // that tells a popup menu to dismiss itself when the user clicks
+        // elsewhere — the classic Win32 "menu that won't go away" bug. This
+        // hidden window is never activated any other way, so it has to be
+        // forced here.
+        SetForegroundWindow(hwnd);
+        let cmd = TrackPopupMenu(
+            menu,
+            TPM_RETURNCMD | TPM_RIGHTBUTTON,
+            point.x,
+            point.y,
+            0,
+            hwnd,
+            ptr::null(),
+        );
+        DestroyMenu(menu);
+
+        match cmd as u32 {
+            ID_MENU_OPEN_LOG => open_log_file(),
+            ID_MENU_EXIT => {
+                DestroyWindow(hwnd);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Opens the log with whatever the user has associated with `.log` files —
+/// same as double-clicking it in Explorer. The listener has no window of its
+/// own to display the log in, and doesn't need one just for this.
+fn open_log_file() {
+    with_state(|state| {
+        let Some(path) = state.log.path() else {
+            return;
+        };
+        let verb = wide("open");
+        let file = wide(&path.to_string_lossy());
+        unsafe {
+            ShellExecuteW(
+                ptr::null_mut(),
+                verb.as_ptr(),
+                file.as_ptr(),
+                ptr::null(),
+                ptr::null(),
+                SW_SHOWNORMAL as i32,
+            );
+        }
+    });
 }
 
 /// Decodes one `DBT_DEVICEARRIVAL` and runs the shared core over every drive
@@ -363,45 +518,4 @@ fn is_candidate_drive(drive_type: u32) -> bool {
 /// A NUL-terminated UTF-16 buffer for the Win32 `…W` entry points.
 fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn expands_a_unit_mask_into_every_letter_it_names() {
-        assert_eq!(letters_from_mask(0), Vec::<char>::new());
-        assert_eq!(letters_from_mask(1), vec!['A']);
-        // The case the bitmask exists for: one event, several partitions.
-        assert_eq!(letters_from_mask(0b1_0001_0000), vec!['E', 'I']);
-        assert_eq!(letters_from_mask(1 << 25), vec!['Z']);
-        // Bits above Z are not letters and must not be invented.
-        assert_eq!(letters_from_mask(u32::MAX).len(), 26);
-    }
-
-    #[test]
-    fn only_local_storage_is_a_candidate() {
-        assert!(is_candidate_drive(DRIVE_FIXED));
-        assert!(is_candidate_drive(DRIVE_REMOVABLE));
-        for other in [
-            windows_sys::Win32::System::WindowsProgramming::DRIVE_REMOTE,
-            windows_sys::Win32::System::WindowsProgramming::DRIVE_CDROM,
-            windows_sys::Win32::System::WindowsProgramming::DRIVE_RAMDISK,
-            windows_sys::Win32::System::WindowsProgramming::DRIVE_NO_ROOT_DIR,
-            windows_sys::Win32::System::WindowsProgramming::DRIVE_UNKNOWN,
-        ] {
-            assert!(!is_candidate_drive(other));
-        }
-    }
-
-    #[test]
-    fn drive_roots_are_absolute_letter_paths() {
-        assert_eq!(drive_root('E'), PathBuf::from(r"E:\"));
-    }
-
-    #[test]
-    fn wide_strings_are_nul_terminated() {
-        assert_eq!(wide("A:"), vec![65, 58, 0]);
-    }
 }

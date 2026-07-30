@@ -68,7 +68,7 @@ pub fn ratio_warning(path: &Path) -> Option<String> {
     })
 }
 
-fn parse(bytes: &[u8]) -> Option<(u32, u32)> {
+pub(crate) fn parse(bytes: &[u8]) -> Option<(u32, u32)> {
     png(bytes).or_else(|| webp(bytes)).or_else(|| gif(bytes)).or_else(|| jpeg(bytes))
 }
 
@@ -168,103 +168,4 @@ fn le16(bytes: &[u8]) -> u16 {
 
 fn le24(bytes: &[u8]) -> u32 {
     u32::from_le_bytes([bytes[0], bytes[1], bytes[2], 0])
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn png_header(width: u32, height: u32) -> Vec<u8> {
-        let mut bytes = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
-        bytes.extend_from_slice(&13u32.to_be_bytes());
-        bytes.extend_from_slice(b"IHDR");
-        bytes.extend_from_slice(&width.to_be_bytes());
-        bytes.extend_from_slice(&height.to_be_bytes());
-        bytes
-    }
-
-    fn riff(chunk: &[u8; 4], body: &[u8]) -> Vec<u8> {
-        let mut bytes = b"RIFF".to_vec();
-        bytes.extend_from_slice(&0u32.to_le_bytes());
-        bytes.extend_from_slice(b"WEBP");
-        bytes.extend_from_slice(chunk);
-        bytes.extend_from_slice(&(body.len() as u32).to_le_bytes());
-        bytes.extend_from_slice(body);
-        bytes
-    }
-
-    #[test]
-    fn reads_a_png() {
-        assert_eq!(parse(&png_header(600, 900)), Some((600, 900)));
-    }
-
-    #[test]
-    fn reads_an_animated_webp() {
-        // VP8X — the shape the covers in this project actually are, and the
-        // reason the format is sniffed from bytes rather than trusted from the
-        // `.png` name they are usually saved under.
-        let mut body = vec![0x10, 0, 0, 0]; // flags: has animation
-        body.extend_from_slice(&[0x57, 0x02, 0x00]); // 600-1, 24-bit LE
-        body.extend_from_slice(&[0x83, 0x03, 0x00]); // 900-1
-        assert_eq!(parse(&riff(b"VP8X", &body)), Some((600, 900)));
-    }
-
-    #[test]
-    fn reads_a_lossless_webp() {
-        let bits: u32 = (599) | (899 << 14);
-        let mut body = vec![0x2f];
-        body.extend_from_slice(&bits.to_le_bytes());
-        body.extend_from_slice(&[0; 8]);
-        assert_eq!(parse(&riff(b"VP8L", &body)), Some((600, 900)));
-    }
-
-    #[test]
-    fn reads_a_lossy_webp() {
-        let mut body = vec![0x00, 0x00, 0x00, 0x9d, 0x01, 0x2a];
-        body.extend_from_slice(&600u16.to_le_bytes());
-        body.extend_from_slice(&900u16.to_le_bytes());
-        body.extend_from_slice(&[0; 8]);
-        assert_eq!(parse(&riff(b"VP8 ", &body)), Some((600, 900)));
-    }
-
-    #[test]
-    fn reads_a_gif() {
-        let mut bytes = b"GIF89a".to_vec();
-        bytes.extend_from_slice(&600u16.to_le_bytes());
-        bytes.extend_from_slice(&900u16.to_le_bytes());
-        assert_eq!(parse(&bytes), Some((600, 900)));
-    }
-
-    #[test]
-    fn reads_a_jpeg_behind_a_metadata_segment() {
-        let mut bytes = vec![0xff, 0xd8];
-        // An APP1 (EXIF) segment the size walk has to step over.
-        bytes.extend_from_slice(&[0xff, 0xe1, 0x00, 0x10]);
-        bytes.extend_from_slice(&[0u8; 14]);
-        // SOF0: length, precision, height, width.
-        bytes.extend_from_slice(&[0xff, 0xc0, 0x00, 0x11, 0x08]);
-        bytes.extend_from_slice(&900u16.to_be_bytes());
-        bytes.extend_from_slice(&600u16.to_be_bytes());
-        bytes.extend_from_slice(&[0u8; 8]);
-        assert_eq!(parse(&bytes), Some((600, 900)));
-    }
-
-    #[test]
-    fn an_unrecognised_file_is_not_a_failure() {
-        assert_eq!(parse(b"this is not a picture at all"), None);
-        assert_eq!(parse(&[]), None);
-    }
-
-    #[test]
-    fn only_a_real_departure_from_2_by_3_is_worth_a_warning() {
-        let warn = |w: u32, h: u32| {
-            let ratio = w as f64 / h as f64;
-            (ratio - TARGET_RATIO).abs() > TARGET_RATIO * RATIO_TOLERANCE
-        };
-        assert!(!warn(600, 900));
-        assert!(!warn(1200, 1800));
-        assert!(!warn(602, 900)); // rounding from whatever made the file
-        assert!(warn(1920, 1080));
-        assert!(warn(900, 900));
-    }
 }

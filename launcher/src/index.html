@@ -84,6 +84,16 @@
     align-items: center;
   }
 
+  /* What a cartridge with an empty catalog says instead of showing a row of
+     covers. Same muted grey and size as a caption: it is a statement of fact
+     about the cartridge, not a warning, and shouldn't be dressed as one. */
+  #empty {
+    display: none;
+    color: #cfcfcf;
+    font-size: 0.85rem;
+    text-align: center;
+  }
+
   .card {
     appearance: none;
     border: none;
@@ -202,6 +212,25 @@
 
   .card.unavailable .sign {
     display: block;
+  }
+
+  /* ── A cover whose art couldn't be loaded ───────────────────────────── */
+  /* The <img> is hidden rather than left to draw the webview's own
+     broken-image glyph, which sits in the corner, ignores the rounded corners
+     and reads as a page that failed to load rather than as a stated fact.
+     Hidden and not removed: it still holds the box the sizing math gave it, so
+     the cover keeps its place in the row and the sign stays centred on it.
+     The plate and shadow move up to .cover, since a hidden element draws
+     neither. */
+
+  .card.no-cover img {
+    visibility: hidden;
+  }
+
+  .card.no-cover .cover {
+    background: #151515;
+    border-radius: var(--corner-radius);
+    box-shadow: var(--shadow);
   }
 
   /* ── A game that was chosen but failed to start ─────────────────────── */
@@ -345,6 +374,10 @@
 <body>
   <button id="close-btn" title="Close" onclick="window.ipc.postMessage('close')">&#10005;</button>
   <div id="grid"></div>
+  <!-- Shown in place of the grid when the catalog is empty. Hidden by default:
+       the common case is a cartridge with games, and a message that flashes
+       before the covers appear would read as an error that wasn't one. -->
+  <div id="empty">No games on this cartridge</div>
   <div id="scrim"></div>
   <!-- The circle's radius, thickness and dash pattern are all set in JS. -->
   <svg id="ring" viewBox="0 0 100 100" aria-hidden="true">
@@ -422,6 +455,18 @@
     // Not named `status`: that would shadow window.status.
     const statusLine = document.getElementById("status");
 
+    // An empty catalog is a normal state, not a failure — a cartridge nobody
+    // has put a game on yet. Say so, rather than showing an empty window that
+    // looks like the page failed to load. `display` rather than the `hidden`
+    // attribute because #grid's own `inline-flex` would win over it.
+    //
+    // Everything below still runs unchanged: the card loop, layout() and the
+    // preload barrier all iterate an empty list and do nothing.
+    if (games.length === 0) {
+      grid.style.display = "none";
+      document.getElementById("empty").style.display = "block";
+    }
+
     // "idle" or "launching". One game at a time: while a launch is in flight
     // every other cover is on its way off screen anyway.
     let state = "idle";
@@ -469,6 +514,22 @@
       } else {
         card.title = game.name;
         card.addEventListener("click", () => beginLaunch(index));
+
+        // Cover art that can't be loaded — wrong path in catalog.json, file
+        // never copied, a format the webview won't decode — otherwise leaves a
+        // bare dark rectangle that reads as placeholder art. Borrow the missing
+        // game's dim-and-sign treatment to say the cover is the thing that's
+        // absent. The card stays clickable: the game itself is on the cartridge
+        // and still runs. Only set for a game that IS available — one whose exe
+        // is missing already carries the more important message.
+        img.addEventListener("error", () => {
+          card.classList.add("unavailable", "no-cover");
+          note.textContent = "Cover missing";
+          // Clearing alt so the webview doesn't lay the alt text out where the
+          // picture would have been — it spills out of the cover's box and over
+          // the card above it. The sign and the note carry the meaning now.
+          img.alt = "";
+        });
       }
 
       grid.appendChild(card);

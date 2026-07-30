@@ -6,23 +6,27 @@
 
 //! The games screen — steps 3 to 4 of job 1, and all of job 3's editing.
 //!
-//! One list of what is already on the cartridge (edit mode only) and one of what
-//! is being added. Every added game shows the same three decisions: its name,
-//! which executable to start, and which cover to show.
+//! The cartridge's own name, then one list of what is already on it (edit mode
+//! only) and one of what is being added. Every added game shows the same three
+//! decisions: its name, which executable to start, and which cover to show.
 //!
 //! The executable row is the one that matters. Auto-detection preselects a
 //! *clear* winner and leaves the field empty otherwise, and Browse is offered
 //! either way — the guess is never presented as settled.
 
-use eframe::egui;
 
 use crate::app::{App, Mode};
+use crate::version;
 use crate::volume::human_bytes;
 
 use super::{BAD, GOOD, WARN};
 
 pub fn screen(app: &mut App, ctx: &egui::Context, ui: &mut egui::Ui) {
+    name(app, ui);
+    ui.separator();
+
     if app.mode == Mode::Edit {
+        stale_launcher(app, ctx, ui);
         existing(app, ui);
         ui.separator();
     }
@@ -56,6 +60,54 @@ pub fn screen(app: &mut App, ctx: &egui::Context, ui: &mut egui::Ui) {
         ui.add_space(12.0);
         ui.label(egui::RichText::new("No games added yet.").weak());
     }
+}
+
+/// What the cartridge is called — the drive's volume label, and the only part of
+/// a cartridge that isn't a file on it.
+///
+/// Nothing is written here: the new name rides along in the plan and is applied
+/// with the rest, so backing out of this screen leaves the drive alone. A name
+/// the filesystem won't take is reported by the footer, like every other thing
+/// standing between here and Review.
+fn name(app: &mut App, ui: &mut egui::Ui) {
+    let limit = app.volume().map(|v| v.max_label_len()).unwrap_or(32);
+    ui.horizontal(|ui| {
+        ui.label("Cartridge name:");
+        ui.add(egui::TextEdit::singleline(&mut app.name).desired_width(300.0));
+    });
+    ui.label(
+        egui::RichText::new(format!(
+            "The drive's name — what Windows shows beside it in Explorer. Up to {limit} \
+             characters; leave it empty for no name."
+        ))
+        .weak()
+        .small(),
+    );
+    ui.add_space(8.0);
+}
+
+/// Shown when `App::poll_launcher_probe` found this cartridge's launcher.exe
+/// answering a version other than the one this installer carries. There is
+/// deliberately no way to reach Review over this alone — see `Plan::is_empty` —
+/// so this is the only path to refreshing a launcher on a cartridge whose games
+/// and name are otherwise fine.
+fn stale_launcher(app: &mut App, ctx: &egui::Context, ui: &mut egui::Ui) {
+    let Some(theirs) = app.stale_launcher else {
+        return;
+    };
+    let ours = version::bundled().expect(
+        "stale_launcher is only set when both the probe and the bundled version parsed",
+    );
+    egui::Frame::group(ui.style()).show(ui, |ui| {
+        ui.colored_label(
+            WARN,
+            format!("This cartridge's launcher is version {theirs}, this installer carries {ours}."),
+        );
+        if ui.button("Update launcher").clicked() {
+            app.update_launcher(ctx);
+        }
+    });
+    ui.add_space(8.0);
 }
 
 /// What the cartridge already holds, with a checkbox per game.

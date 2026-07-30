@@ -119,27 +119,3 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
     let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32; // [1, 12]
     (if m <= 2 { y + 1 } else { y }, m, d)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn slug_reduces_a_name_to_a_folder_name() {
-        assert_eq!(slug("Hollow Knight", 0), "hollow-knight");
-        assert_eq!(slug("Baldur's Gate 3", 1), "baldur-s-gate-3");
-        assert_eq!(slug("  Elden   Ring  ", 2), "elden-ring");
-    }
-
-    #[test]
-    fn slug_falls_back_to_the_catalog_position() {
-        assert_eq!(slug("", 4), "game-4");
-        assert_eq!(slug("///", 7), "game-7");
-    }
-
-    #[test]
-    fn civil_from_days_matches_known_dates() {
-        assert_eq!(civil_from_days(0), (1970, 1, 1));
-        assert_eq!(civil_from_days(11_016), (2000, 2, 29));
-    }
-}

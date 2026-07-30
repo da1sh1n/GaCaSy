@@ -18,4 +18,4 @@ EBWebView/
 # *your* key: a listener built from this tree trusts it, and committing it would
 # quietly ask everyone else's build to trust it too. keys/gacasy.pub — the
 # release key — is tracked, and is the only one that should be.
-keys/dev.pub
+keys/

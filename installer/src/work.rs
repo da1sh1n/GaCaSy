@@ -23,6 +23,7 @@ use std::thread;
 
 use crate::cartridge::Progress;
 use crate::detect;
+use crate::version::{self, Version};
 
 enum Update {
     Progress(Progress),
@@ -53,7 +54,7 @@ impl Job {
     /// The task is handed a cancel flag to check and a reporter to call; both
     /// are the only channels it has to the UI, which is what keeps every
     /// long-running operation in this program shaped the same way.
-    pub fn spawn<F>(ctx: &eframe::egui::Context, title: impl Into<String>, task: F) -> Job
+    pub fn spawn<F>(ctx: &egui::Context, title: impl Into<String>, task: F) -> Job
     where
         F: FnOnce(&AtomicBool, &mut dyn FnMut(Progress)) -> Result<Vec<String>, String>
             + Send
@@ -135,7 +136,7 @@ pub struct Scanning {
 }
 
 impl Scanning {
-    pub fn start(ctx: &eframe::egui::Context, folder: PathBuf) -> Scanning {
+    pub fn start(ctx: &egui::Context, folder: PathBuf) -> Scanning {
         let (sender, result) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
         let flag = cancel.clone();
@@ -158,5 +159,29 @@ impl Drop for Scanning {
     /// thread grinding through a 100 GB install for nothing.
     fn drop(&mut self) {
         self.cancel.store(true, Ordering::Relaxed);
+    }
+}
+
+/// Asks a cartridge's own `launcher.exe` for its version, in the background —
+/// same shape as [`Scanning`]. It has no cancel flag: [`version::probe`] already
+/// bounds itself with a timeout, so there is nothing a cancel would shorten.
+pub struct LauncherProbe {
+    result: Receiver<Option<Version>>,
+}
+
+impl LauncherProbe {
+    pub fn start(ctx: &egui::Context, exe: PathBuf) -> LauncherProbe {
+        let (sender, result) = mpsc::channel();
+        let ctx = ctx.clone();
+        thread::spawn(move || {
+            let _ = sender.send(version::probe(&exe));
+            ctx.request_repaint();
+        });
+        LauncherProbe { result }
+    }
+
+    /// The probe's answer, once there is one.
+    pub fn take(&self) -> Option<Option<Version>> {
+        self.result.try_recv().ok()
     }
 }

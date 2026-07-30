@@ -1,6 +1,6 @@
 [package]
 name = "listener"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 
@@ -35,4 +35,11 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_System_Threading",                # CreateMutexW
     "Win32_System_WindowsProgramming",       # DRIVE_* constants
     "Win32_UI_WindowsAndMessaging",          # the message loop, and MessageBoxW
+    "Win32_UI_Shell",                        # Shell_NotifyIconW, the tray icon
 ] }
+
+# Compiles the tray icon and version info (FileDescription etc.) into the exe.
+# Windows-only for the same reason the dependency above is: nothing here has
+# any bearing on a Linux build.
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"

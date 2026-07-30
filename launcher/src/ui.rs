@@ -60,6 +60,7 @@ pub fn run(base_dir: &Path) -> wry::Result<()> {
 
     let (window_width, window_height) =
         window::size(&event_loop, games.len(), config.image_gap, config.border_gap);
+    let show_console_window = config.show_console_window;
 
     let window = WindowBuilder::new()
         .with_title("Cartridge Launcher")
@@ -74,6 +75,9 @@ pub fn run(base_dir: &Path) -> wry::Result<()> {
         .expect("failed to create window");
 
     window::center(&window);
+    // Only now, once it is the size and in the place it will stay: raising a
+    // window that is still being moved shows the move.
+    window::raise(&window);
 
     let base_for_launch = base_dir.to_path_buf();
     let base_for_protocol = base_dir.to_path_buf();
@@ -113,7 +117,7 @@ pub fn run(base_dir: &Path) -> wry::Result<()> {
             // which reports back through the same proxy the close button uses.
             // Blocking here would freeze the very animation that exists to show
             // the player something is happening.
-            match launch::spawn(&base_for_launch, game, index) {
+            match launch::spawn(&base_for_launch, game, index, show_console_window) {
                 Ok(child) => {
                     let proxy = proxy.clone();
                     let base = base_for_launch.clone();
@@ -146,6 +150,9 @@ pub fn run(base_dir: &Path) -> wry::Result<()> {
     // passes overwrites Exit with Wait, and the launcher lives on as a
     // process with no window, still holding the single-instance mutex.
     let mut exiting = false;
+    // The end of the grace period window::raise opened. Cleared once it has been
+    // acted on, so the drop happens exactly once.
+    let mut topmost_until = Some(Instant::now() + TOPMOST_GRACE);
 
     event_loop.run(move |event, _, control_flow| {
         match event {
@@ -173,16 +180,26 @@ pub fn run(base_dir: &Path) -> wry::Result<()> {
 
         // Rebuilt on every pass rather than set once: while a deadline is
         // armed the loop has to wake up at it, and the wake-up itself is what
-        // exits. (`webview` is kept alive here for the window's lifetime.)
+        // acts on it. (`webview` and `window` are both kept alive here for the
+        // window's lifetime; `window` is also what the topmost drop needs.)
         if let Some(deadline) = exit_deadline {
             if Instant::now() >= deadline {
                 exiting = true;
             }
         }
+        if let Some(deadline) = topmost_until {
+            if Instant::now() >= deadline {
+                window::drop_topmost(&window);
+                topmost_until = None;
+            }
+        }
         *control_flow = if exiting {
             ControlFlow::Exit
         } else {
-            match exit_deadline {
+            // Whichever is sooner: two independent deadlines can be armed at
+            // once, and waking at the later one would let the earlier pass
+            // unnoticed until some other event happened to arrive.
+            match exit_deadline.into_iter().chain(topmost_until).min() {
                 Some(deadline) => ControlFlow::WaitUntil(deadline),
                 None => ControlFlow::Wait,
             }

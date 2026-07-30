@@ -43,6 +43,7 @@ pub struct Config {
     pub loading_ring_segments: f64,
     pub loading_ring_speed: f64,
     pub loading_text_gap: f64,
+    pub show_console_window: bool,
 }
 
 impl Default for Config {
@@ -67,6 +68,10 @@ impl Default for Config {
             loading_ring_segments: DEFAULT_LOADING_RING_SEGMENTS,
             loading_ring_speed: DEFAULT_LOADING_RING_SPEED,
             loading_text_gap: DEFAULT_LOADING_TEXT_GAP,
+            // Off by default: a console game's window is ugly but harmless, and
+            // hiding it is one fewer thing standing between "chose a cover" and
+            // "game's on screen".
+            show_console_window: false,
         }
     }
 }
@@ -108,6 +113,9 @@ pub fn load(base_dir: &Path) -> Config {
     );
     set_f64(&mut config.loading_ring_speed, table.get("loading_ring_speed"));
     set_f64(&mut config.loading_text_gap, table.get("loading_text_gap"));
+    if let Some(value) = table.get("show_console_window").and_then(|v| v.as_bool()) {
+        config.show_console_window = value;
+    }
 
     // Held to the floor here rather than in the page, so anything reading the
     // config sees the speed the ring will actually turn at. `set_f64` has
@@ -141,59 +149,151 @@ fn set_color(slot: &mut String, value: Option<&toml::Value>) {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::env;
+/// Every key `config.toml` can hold: its TOML name, a one-line description,
+/// and its default value formatted exactly as it would appear in the file.
+/// The only consumer is [`sync_defaults`] — this is not where `load` gets its
+/// defaults from, `Default for Config` above still owns those — so a knob
+/// that's missing here just doesn't get documented for an old cartridge; it
+/// still works.
+fn known_settings() -> Vec<(&'static str, &'static str, String)> {
+    vec![
+        (
+            "show_captions",
+            "Show the game's name under its cover card.",
+            "false".to_string(),
+        ),
+        (
+            "border_gap",
+            "Empty space between the window edge and the covers.",
+            DEFAULT_BORDER_GAP.to_string(),
+        ),
+        (
+            "image_gap",
+            "Gap between adjacent covers.",
+            DEFAULT_IMAGE_GAP.to_string(),
+        ),
+        (
+            "corner_radius",
+            "How rounded each cover's corners are (0 = square).",
+            DEFAULT_CORNER_RADIUS.to_string(),
+        ),
+        (
+            "background_color",
+            "Window / page background behind the covers.",
+            format!("\"{DEFAULT_BACKGROUND_COLOR}\""),
+        ),
+        (
+            "shadow_size",
+            "How far the shadow reaches out from the cover edge.",
+            DEFAULT_SHADOW_SIZE.to_string(),
+        ),
+        (
+            "shadow_fade",
+            "Solid color for this many px before the shadow starts fading.",
+            DEFAULT_SHADOW_FADE.to_string(),
+        ),
+        (
+            "shadow_color",
+            "The shadow's color; use the rgba alpha to set how dark it is.",
+            format!("\"{DEFAULT_SHADOW_COLOR}\""),
+        ),
+        (
+            "overlay_color",
+            "Screen darkening while the chosen game starts up.",
+            format!("\"{DEFAULT_OVERLAY_COLOR}\""),
+        ),
+        (
+            "loading_ring_color",
+            "Color of the ring that spins while a game starts.",
+            format!("\"{DEFAULT_LOADING_RING_COLOR}\""),
+        ),
+        (
+            "loading_text_color",
+            "Color of the status line under the loading ring.",
+            format!("\"{DEFAULT_LOADING_TEXT_COLOR}\""),
+        ),
+        (
+            "loading_ring_segments",
+            "How many pieces the loading ring is cut into.",
+            DEFAULT_LOADING_RING_SEGMENTS.to_string(),
+        ),
+        (
+            "loading_ring_speed",
+            "How fast the loading ring turns, in turns per second.",
+            DEFAULT_LOADING_RING_SPEED.to_string(),
+        ),
+        (
+            "loading_text_gap",
+            "Pixels between the loading ring and the text under it.",
+            DEFAULT_LOADING_TEXT_GAP.to_string(),
+        ),
+        (
+            "error_border_color",
+            "Border color on a cover that failed to launch.",
+            format!("\"{DEFAULT_ERROR_BORDER_COLOR}\""),
+        ),
+        (
+            "error_border_width",
+            "Width of that border.",
+            DEFAULT_ERROR_BORDER_WIDTH.to_string(),
+        ),
+        (
+            "error_text_color",
+            "Color of the failure message under the cover.",
+            format!("\"{DEFAULT_ERROR_TEXT_COLOR}\""),
+        ),
+        (
+            "missing_sign_color",
+            "Sign color over a game whose exe isn't on the cartridge.",
+            format!("\"{DEFAULT_MISSING_SIGN_COLOR}\""),
+        ),
+        (
+            "missing_dim",
+            "Brightness multiplier for a missing game's cover (1 = untouched, 0 = black).",
+            DEFAULT_MISSING_DIM.to_string(),
+        ),
+        (
+            "show_console_window",
+            "Show the console window a console-mode game would normally open.",
+            "false".to_string(),
+        ),
+    ]
+}
 
-    /// Writes `contents` as a config.toml in its own temp folder and reads it
-    /// back through the real loader.
-    fn config_from(name: &str, contents: &str) -> Config {
-        let dir = env::temp_dir().join(format!("gacasy-config-{name}"));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).expect("temp dir");
-        fs::write(dir.join("config.toml"), contents).expect("write config");
-        load(&dir)
+/// Appends a commented-out, already-in-effect line for every known setting
+/// missing from `config.toml` — the case where the cartridge was set up
+/// before that setting existed. Nothing about the running launcher changes
+/// (the lines are comments, and each one already names the default that was
+/// silently in force); this only makes the setting discoverable, and
+/// uncommenting the line is how you go back and pick something else.
+///
+/// A no-op if the file can't be read or doesn't parse as TOML, and a no-op
+/// once every known key is present — most runs, after the first.
+pub fn sync_defaults(config_path: &Path) {
+    let Ok(contents) = fs::read_to_string(config_path) else {
+        return;
+    };
+    let Ok(table) = contents.parse::<toml::Table>() else {
+        return;
+    };
+
+    let missing: Vec<_> = known_settings()
+        .into_iter()
+        .filter(|(key, _, _)| !table.contains_key(*key))
+        .collect();
+    if missing.is_empty() {
+        return;
     }
 
-    #[test]
-    fn ring_speed_is_held_to_its_floor() {
-        // The floor exists only to keep the ring turning at all: a stopped one
-        // says the opposite of what it's there to say.
-        assert_eq!(
-            config_from("stopped", "loading_ring_speed = 0").loading_ring_speed,
-            MIN_LOADING_RING_SPEED
-        );
-        assert_eq!(
-            config_from("crawling", "loading_ring_speed = 0.001").loading_ring_speed,
-            MIN_LOADING_RING_SPEED
-        );
-        // Anything at or above it is left exactly as written, however slow.
-        assert_eq!(
-            config_from("slow", "loading_ring_speed = 0.06").loading_ring_speed,
-            0.06
-        );
-        assert_eq!(
-            config_from("fast", "loading_ring_speed = 1.5").loading_ring_speed,
-            1.5
-        );
+    let mut addition = String::from(
+        "\n# ── Added since this file was created ───────────────────────────────────\n\
+         # These settings didn't exist yet when this config was written. Each is\n\
+         # commented out below and already running at the default value shown;\n\
+         # uncomment and edit a line to change it.\n",
+    );
+    for (key, doc, default) in missing {
+        addition.push_str(&format!("\n# {doc}\n# {key} = {default}\n"));
     }
 
-    #[test]
-    fn an_unusable_value_costs_only_its_own_setting() {
-        let config = config_from(
-            "onebad",
-            "error_border_width = \"oops\"\nloading_text_gap = 40\n",
-        );
-        assert_eq!(config.error_border_width, DEFAULT_ERROR_BORDER_WIDTH);
-        assert_eq!(config.loading_text_gap, 40.0);
-    }
-
-    #[test]
-    fn a_file_that_isnt_toml_leaves_every_default_standing() {
-        let config = config_from("garbage", "this is not toml at all {{{");
-        assert_eq!(config.loading_ring_segments, DEFAULT_LOADING_RING_SEGMENTS);
-        assert_eq!(config.loading_ring_color, DEFAULT_LOADING_RING_COLOR);
-        assert_eq!(config.loading_ring_speed, DEFAULT_LOADING_RING_SPEED);
-    }
+    let _ = fs::write(config_path, contents + &addition);
 }

@@ -24,18 +24,17 @@ doesn't. Details in [`structure.md`](structure.md#launching-a-game).
 - [x] Config knobs for all of it: `overlay_color`, `loading_ring_color`,
       `loading_text_color`, `loading_ring_segments`, `error_border_color`,
       `error_border_width`, `error_text_color`, `missing_sign_color`, `missing_dim`.
-- [ ] Console games open a console window when launched (no `CREATE_NO_WINDOW`). Harmless
-      for real games, ugly for stand-ins; worth suppressing if it ever matters.
-- [ ] The availability check runs once, at startup. A cartridge whose files change while
-      the launcher is open won't notice until it's restarted.
-- [ ] `config.toml` is only ever written when missing, so a cartridge set up before a
-      knob existed never sees that knob — it silently runs on the default and there is
-      nothing in the file to discover it from. Every new setting has to be pasted into
-      existing configs by hand. Worth either appending unknown-but-known-good defaults
-      on startup, or shipping a documented full-reference config alongside the live one.
+- [x] Console games open a console window when launched. Suppressed with `CREATE_NO_WINDOW`
+      by default; `show_console_window` in `config.toml` brings it back if that's ever
+      wanted.
+- [x] `config.toml` is only ever written when missing, so a cartridge set up before a
+      knob existed never saw that knob. `config::sync_defaults()` now appends a
+      commented-out, already-in-effect `# key = default` line (with a short description)
+      for any known setting missing from the file, every startup — nothing about current
+      behavior changes, but the knob is there to find and uncomment.
 
 ## v2
 
-- [ ] Code-signing of `launcher.exe`, after which the exe's signature becomes the identity
+- [x] Code-signing of `launcher.exe`, after which the exe's signature becomes the identity
       and `.cartridge` is retired. See [`structure.md`](structure.md#status) — the
       launcher's only remaining identity work.

@@ -27,6 +27,9 @@ mod manifest;
 mod release;
 mod sign;
 
+#[cfg(test)]
+mod tests;
+
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 

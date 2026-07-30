@@ -1,6 +1,6 @@
 [package]
 name = "launcher"
-version = "0.2.0"
+version = "0.5.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 
@@ -13,9 +13,11 @@ sigblock = { path = "../sigblock" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 rust-embed = { version = "8.5.0", features = ["include-exclude"] }
-tao = "0.35.3"
-toml = "0.9.8"
-wry = { version = "0.55.1", features = ["protocol"] }
+tao = "0.36.0"
+toml = "1.1.4"
+# `protocol` used to be here: 0.56.0 removed it and made `with_custom_protocol`
+# (see src/ui.rs) always available, so there is no longer a feature to enable.
+wry = "0.56.0"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = [

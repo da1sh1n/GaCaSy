@@ -106,6 +106,14 @@ pub const MIN_LOADING_AFTER_FAIL: Duration = Duration::from_millis(1000);
 /// screen in front of a running game if the page's JS is broken or missing.
 pub const LAUNCH_EXIT_FALLBACK: Duration = Duration::from_millis(1200);
 
+/// How long the window stays pinned above everything else after it opens.
+///
+/// Long enough to outlast anything else the same device event set off — an
+/// AutoPlay Explorer window is the one that matters, and it takes a moment to
+/// appear — and short enough that it is over before the player has finished
+/// looking at the covers. See [`crate::window::raise`].
+pub const TOPMOST_GRACE: Duration = Duration::from_millis(1500);
+
 // ── Starting a game (launch.rs) ──────────────────────────────────────────
 
 /// How long to wait for the game to put a window on screen before giving up on

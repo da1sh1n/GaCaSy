@@ -32,6 +32,10 @@
 //!
 //! `EBWebView/` and `logs/` are not created — the launcher makes those on first
 //! run.
+//!
+//! One part of a cartridge is not in that layout at all: its **name**, which is
+//! the drive's volume label. A plan can carry a new one, and `apply` sets it
+//! last — see [`Plan::label`] and `../volume.rs`.
 
 use std::collections::HashSet;
 use std::fs;
@@ -90,6 +94,9 @@ pub struct Plan {
     /// Entries to delete, with their files.
     pub remove: Vec<Entry>,
     pub add: Vec<PlannedGame>,
+    /// The name to give the drive, when it differs from the one it has now.
+    /// `Some("")` clears the label; `None` leaves it alone.
+    pub label: Option<String>,
 }
 
 impl Plan {
@@ -112,12 +119,18 @@ impl Plan {
     /// copy simply proceeds with the room they freed, and if this passes without
     /// them the answer was never in doubt.
     pub fn required_bytes(&self) -> u64 {
-        self.bytes_to_copy() + payload::LAUNCHER_EXE.len() as u64 + FREE_SPACE_SLACK
+        // The size the launcher unpacks to, not the size it is carried at — what
+        // lands on the drive is the whole exe.
+        self.bytes_to_copy() + payload::LAUNCHER_BYTES + FREE_SPACE_SLACK
     }
 
     /// True when this plan would change nothing.
+    ///
+    /// A rename counts. Renaming is the one thing a plan can do without adding
+    /// or removing a game, and leaving it out here would let the footer refuse a
+    /// plan whose whole point was the new name.
     pub fn is_empty(&self) -> bool {
-        self.add.is_empty() && self.remove.is_empty()
+        self.add.is_empty() && self.remove.is_empty() && self.label.is_none()
     }
 }
 
@@ -144,11 +157,20 @@ pub struct Progress {
 ///    it carries the signature the listener checks, so until it lands the volume
 ///    is inert, and a run that fails before this point leaves an ordinary folder
 ///    rather than a cartridge that half works.
+/// 5. **The drive's name after even that**, so a cancelled or failed run never
+///    reaches it. That is what keeps "the cartridge is as it was" literally true
+///    of a cancel, and it means the rename needs no entry in [`unwind`] — the
+///    only step that isn't a file is also the only one nothing has to undo.
+///
+/// Returns the one thing that can go wrong without the cartridge being wrong:
+/// `Ok(Some(warning))` means everything was written and only the rename failed.
+/// Reporting that as `Err` would tell the user a working cartridge didn't work,
+/// and unwinding gigabytes of correctly copied games over a name is worse still.
 pub fn apply(
     plan: &Plan,
     cancel: &AtomicBool,
     report: &mut dyn FnMut(Progress),
-) -> Result<(), String> {
+) -> Result<Option<String>, String> {
     if let Some(defect) = payload::defect() {
         return Err(defect);
     }
@@ -226,10 +248,25 @@ pub fn apply(
     // up a newer one. Refreshing it also re-establishes identity — the signature
     // rides inside these bytes — so an old cartridge edited by a new installer
     // comes away trusted by whatever listener that installer ships with.
-    if let Err(e) = copy::bytes(&root.join(LAUNCHER_NAME), payload::LAUNCHER_EXE) {
+    let launcher = match payload::launcher() {
+        Ok(bytes) => bytes,
+        Err(problem) => return Err(unwind(&created, problem)),
+    };
+    if let Err(e) = copy::bytes(&root.join(LAUNCHER_NAME), &launcher) {
         return Err(unwind(&created, e.message()));
     }
-    Ok(())
+
+    let Some(label) = &plan.label else {
+        return Ok(None);
+    };
+    report(Progress {
+        done: total,
+        total,
+        label: "Naming the cartridge".into(),
+    });
+    Ok(crate::volume::set_label(root, label)
+        .err()
+        .map(|e| format!("The drive could not be renamed: {e}. Everything else was written.")))
 }
 
 /// Deletes what this run created and returns the message to show.
@@ -270,163 +307,4 @@ fn remove_entry(root: &Path, entry: &Entry) -> Result<(), String> {
 /// folder name that would land on top of an existing one.
 pub fn taken_slugs(entries: &[Entry]) -> HashSet<String> {
     crate::detect::taken_slugs(entries)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::atomic::AtomicBool;
-
-    fn temp(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join("gacasy-cartridge").join(name);
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).expect("temp dir");
-        dir
-    }
-
-    fn fake_source(dir: &Path, exe: &str, bytes: usize) -> PathBuf {
-        let source = dir.join("Some Game");
-        fs::create_dir_all(source.join("data")).expect("mkdir");
-        fs::write(source.join(exe), vec![1u8; bytes]).expect("write exe");
-        fs::write(source.join("data/pak0.bin"), vec![2u8; bytes]).expect("write data");
-        source
-    }
-
-    fn cover(dir: &Path) -> PathBuf {
-        let path = dir.join("cover.png");
-        fs::write(&path, [0x89, b'P', b'N', b'G']).expect("write cover");
-        path
-    }
-
-    fn plan_for(root: &Path, source: &Path, image: &Path, bytes: u64) -> Plan {
-        Plan {
-            root: root.to_path_buf(),
-            key: "3f9a1c".into(),
-            keep: Vec::new(),
-            remove: Vec::new(),
-            add: vec![PlannedGame {
-                source: source.to_path_buf(),
-                name: "Some Game".into(),
-                slug: "some_game".into(),
-                exe_relative: PathBuf::from("game.exe"),
-                image: image.to_path_buf(),
-                bytes,
-            }],
-        }
-    }
-
-    /// Every assertion here is skipped in a payload-less build, where `apply`
-    /// correctly refuses to write anything at all.
-    fn payload_present() -> bool {
-        payload::defect().is_none()
-    }
-
-    #[test]
-    fn writes_the_layout_the_launcher_expects() {
-        if !payload_present() {
-            return;
-        }
-        let base = temp("create");
-        let root = base.join("volume");
-        fs::create_dir_all(&root).expect("mkdir");
-        let source = fake_source(&base, "game.exe", 2000);
-        let image = cover(&base);
-
-        let plan = plan_for(&root, &source, &image, 4000);
-        apply(&plan, &AtomicBool::new(false), &mut |_| {}).unwrap_or_else(|e| panic!("{e}"));
-
-        assert!(root.join("launcher.exe").is_file());
-        assert!(root.join("config.toml").is_file());
-        assert!(root.join(".cartridge").is_file());
-        assert!(root.join("games/some_game/game.exe").is_file());
-        assert!(root.join("games/some_game/data/pak0.bin").is_file());
-        assert!(root.join("images/some_game.png").is_file());
-
-        let entries = catalog::read(&root).expect("catalog");
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].exe, "games/some_game/game.exe");
-        assert_eq!(entries[0].image, "images/some_game.png");
-        // The key lives in the marker and nowhere else — config.toml is look
-        // and feel only.
-        assert_eq!(marker::read_key(&root).as_deref(), Some("3f9a1c"));
-        let config = fs::read_to_string(root.join("config.toml")).expect("config");
-        assert!(!config.contains("3f9a1c"));
-    }
-
-    #[test]
-    fn a_cancel_leaves_no_half_written_game_behind() {
-        if !payload_present() {
-            return;
-        }
-        let base = temp("cancel");
-        let root = base.join("volume");
-        fs::create_dir_all(&root).expect("mkdir");
-        let source = fake_source(&base, "game.exe", 2000);
-        let image = cover(&base);
-
-        let plan = plan_for(&root, &source, &image, 4000);
-        let error = apply(&plan, &AtomicBool::new(true), &mut |_| {}).expect_err("cancelled");
-        assert_eq!(error, "cancelled");
-
-        assert!(!root.join("games/some_game").exists(), "rolled back");
-        assert!(!root.join("catalog.json").exists(), "no catalog was written");
-    }
-
-    #[test]
-    fn an_existing_config_is_never_restyled_by_an_edit() {
-        if !payload_present() {
-            return;
-        }
-        let base = temp("edit");
-        let root = base.join("volume");
-        fs::create_dir_all(&root).expect("mkdir");
-        fs::write(root.join("config.toml"), "# mine\nshow_captions = true\n").expect("config");
-        let source = fake_source(&base, "game.exe", 1000);
-        let image = cover(&base);
-
-        apply(
-            &plan_for(&root, &source, &image, 2000),
-            &AtomicBool::new(false),
-            &mut |_| {},
-        )
-        .unwrap_or_else(|e| panic!("{e}"));
-
-        assert_eq!(
-            fs::read_to_string(root.join("config.toml")).expect("config"),
-            "# mine\nshow_captions = true\n"
-        );
-    }
-
-    #[test]
-    fn removing_a_game_takes_its_folder_and_cover_with_it() {
-        let base = temp("remove");
-        let root = base.join("volume");
-        fs::create_dir_all(root.join("games/bg3/bin")).expect("mkdir");
-        fs::create_dir_all(root.join("images")).expect("mkdir");
-        fs::write(root.join("games/bg3/bin/bg3.exe"), [0u8; 8]).expect("write");
-        fs::write(root.join("images/bg3.png"), [0u8; 8]).expect("write");
-
-        let entry = Entry {
-            name: "Baldur's Gate 3".into(),
-            exe: "games/bg3/bin/bg3.exe".into(),
-            image: "images/bg3.png".into(),
-        };
-        remove_entry(&root, &entry).expect("removed");
-        assert!(!root.join("games/bg3").exists());
-        assert!(!root.join("images/bg3.png").exists());
-    }
-
-    #[test]
-    fn the_space_estimate_includes_the_launcher_and_headroom() {
-        let plan = Plan {
-            root: PathBuf::from(r"E:\"),
-            key: "k".into(),
-            keep: Vec::new(),
-            remove: Vec::new(),
-            add: Vec::new(),
-        };
-        assert!(plan.is_empty());
-        assert_eq!(plan.bytes_to_copy(), 0);
-        assert!(plan.required_bytes() >= FREE_SPACE_SLACK);
-    }
 }

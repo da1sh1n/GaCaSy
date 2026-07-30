@@ -19,15 +19,18 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use eframe::egui;
 
+use crate::autoplay;
 use crate::cartridge::{self, Plan, PlannedGame};
 use crate::catalog::{self, Entry};
+use crate::copy;
 use crate::detect;
 use crate::image;
 use crate::listener;
+use crate::payload;
+use crate::version::{self, Version};
 use crate::volume::{self, Volume};
-use crate::work::{Job, Scanning};
+use crate::work::{Job, LauncherProbe, Scanning};
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub enum Screen {
@@ -157,9 +160,21 @@ pub struct App {
     pub volumes: Vec<Volume>,
     pub target: Option<usize>,
 
+    /// What the cartridge should be called — the drive's volume label. Seeded
+    /// from the drive's current name when one is picked, so leaving it alone
+    /// means leaving the name alone.
+    pub name: String,
+
     /// Edit mode: what is already on the cartridge, and which of it to delete.
     pub existing: Vec<Entry>,
     pub remove: Vec<bool>,
+
+    /// Edit mode: asking the cartridge's own launcher.exe what version it is.
+    launcher_probe: Option<LauncherProbe>,
+    /// Set once the probe answers with something other than `version::bundled()`.
+    /// `None` covers "not a cartridge", "still probing", "matches", and "the probe
+    /// couldn't tell" alike — none of those are a reason to offer an update.
+    pub stale_launcher: Option<Version>,
 
     pub drafts: Vec<Draft>,
     pub job: Option<Job>,
@@ -171,6 +186,10 @@ pub struct App {
     // ── Job 2 ────────────────────────────────────────────────────────────
     pub listener_installs: Vec<listener::Installed>,
     pub listener_start_now: bool,
+    /// Whether installing should also stop Windows opening a folder when a
+    /// drive arrives. Opt-in because it is a user-wide setting — see
+    /// [`crate::autoplay`].
+    pub suppress_autoplay: bool,
 }
 
 impl App {
@@ -180,14 +199,21 @@ impl App {
             mode: Mode::Create,
             volumes: volume::list(),
             target: None,
+            name: String::new(),
             existing: Vec::new(),
             remove: Vec::new(),
+            launcher_probe: None,
+            stale_launcher: None,
             drafts: Vec::new(),
             job: None,
             outcome: None,
             error: None,
             listener_installs: listener::find(),
             listener_start_now: true,
+            // Ticked unless it has already been done, so the common case is one
+            // less decision and a PC that is already set up is not offered a
+            // change that would do nothing.
+            suppress_autoplay: !autoplay::suppressed(),
         }
     }
 
@@ -206,10 +232,12 @@ impl App {
     }
 
     /// The routing decision, and the only place it is made.
-    pub fn choose_volume(&mut self, index: usize) {
+    pub fn choose_volume(&mut self, ctx: &egui::Context, index: usize) {
         self.target = Some(index);
         self.drafts.clear();
         self.error = None;
+        self.launcher_probe = None;
+        self.stale_launcher = None;
 
         let Some(volume) = self.volumes.get(index) else {
             return;
@@ -229,6 +257,10 @@ impl App {
             return;
         }
         let root = volume.root.clone();
+        // Seeded from the drive rather than left blank: an empty field would
+        // read as "this cartridge has no name" and clear a label the user never
+        // meant to touch.
+        self.name = volume.label.clone();
 
         if volume.is_cartridge {
             self.mode = Mode::Edit;
@@ -236,6 +268,8 @@ impl App {
                 Ok(entries) => {
                     self.remove = vec![false; entries.len()];
                     self.existing = entries;
+                    self.launcher_probe =
+                        Some(LauncherProbe::start(ctx, root.join(cartridge::LAUNCHER_NAME)));
                 }
                 Err(e) => {
                     // Refusing here is the point: writing a new catalog over one
@@ -322,6 +356,12 @@ impl App {
             }
         }
 
+        // Checked here, where every other blocker is, so a name the drive can't
+        // take stops the Review button rather than the last step of a copy that
+        // has already run for minutes.
+        let name = self.name.trim();
+        volume::validate_label(name, &volume.fs)?;
+
         let keep = self.kept_entries();
         let mut taken: HashSet<String> = cartridge::taken_slugs(&keep);
         let add = self
@@ -342,6 +382,7 @@ impl App {
             keep,
             remove: self.removed_entries(),
             add,
+            label: (name != volume.label).then(|| name.to_string()),
         })
     }
 
@@ -355,8 +396,9 @@ impl App {
     pub fn start(&mut self, ctx: &egui::Context, plan: Plan) {
         let games = plan.add.len();
         let removed = plan.remove.len();
+        let renamed = plan.label.clone();
         self.job = Some(Job::spawn(ctx, "Writing the cartridge", move |cancel, report| {
-            cartridge::apply(&plan, cancel, report).map(|()| {
+            cartridge::apply(&plan, cancel, report).map(|warning| {
                 let mut done = Vec::new();
                 if games > 0 {
                     done.push(format!("Copied {games} game(s) onto the cartridge"));
@@ -365,6 +407,17 @@ impl App {
                     done.push(format!("Removed {removed} game(s)"));
                 }
                 done.push("Wrote launcher.exe and catalog.json".into());
+                // The rename is reported whichever way it went: silently
+                // dropping a name the user typed is the one outcome they would
+                // not find out about until they looked at the drive.
+                match (&renamed, warning) {
+                    (_, Some(problem)) => done.push(problem),
+                    (Some(name), None) if name.is_empty() => {
+                        done.push("Cleared the drive's name".into())
+                    }
+                    (Some(name), None) => done.push(format!("Named the drive {name}")),
+                    (None, None) => {}
+                }
                 done.push("Plug it into a PC running the listener to try it".into());
                 done
             })
@@ -374,8 +427,9 @@ impl App {
 
     pub fn install_listener(&mut self, ctx: &egui::Context) {
         let start_now = self.listener_start_now;
+        let suppress_autoplay = self.suppress_autoplay;
         self.start_listener_job(ctx, "Installing the listener", move || {
-            listener::install(start_now)
+            listener::install(start_now, suppress_autoplay)
         });
     }
 
@@ -406,6 +460,41 @@ impl App {
             .uncancellable(),
         );
         self.screen = Screen::Working;
+    }
+
+    /// Picks up the launcher-version probe started in [`Self::choose_volume`].
+    ///
+    /// Any position differing is what this checks — not just the major, which is
+    /// all the listener cares about at runtime. This is "does the cartridge have
+    /// the newest launcher this installer knows how to write", not "will these
+    /// two programs still talk to each other".
+    pub fn poll_launcher_probe(&mut self) {
+        let Some(probe) = &self.launcher_probe else {
+            return;
+        };
+        let Some(theirs) = probe.take() else { return };
+        self.launcher_probe = None;
+        self.stale_launcher = match (theirs, version::bundled()) {
+            (Some(theirs), Some(ours)) if theirs != ours => Some(theirs),
+            _ => None,
+        };
+    }
+
+    /// Rewrites just `launcher.exe` on the current cartridge, independent of the
+    /// games plan — the fast path for a cartridge whose games and name are fine
+    /// and only its launcher is behind. `cartridge::apply` also refreshes it, but
+    /// only as part of a plan that changes something else, and there is
+    /// deliberately no way to reach Review with an empty one — see
+    /// `Plan::is_empty`.
+    pub fn update_launcher(&mut self, ctx: &egui::Context) {
+        let Some(root) = self.volume().map(|v| v.root.clone()) else {
+            return;
+        };
+        self.start_listener_job(ctx, "Updating the launcher", move || {
+            let bytes = payload::launcher()?;
+            copy::bytes(&root.join(cartridge::LAUNCHER_NAME), &bytes).map_err(|e| e.message())?;
+            Ok(vec!["Updated launcher.exe".into()])
+        });
     }
 
     /// Moves a finished job onto the Done screen.

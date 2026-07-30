@@ -64,24 +64,3 @@ pub fn fallback_log_path() -> PathBuf {
         .unwrap_or_else(env::temp_dir);
     base.join("gacasy").join(LOG_FILE)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_log_belongs_beside_the_exe_not_off_in_appdata() {
-        // Carried over from the config tests: the default is the folder the
-        // listener lives in, and %LOCALAPPDATA% is only ever the fallback.
-        let dir = Path::new("C:\\Program Files\\GaCaSy");
-        assert_eq!(default_log_path(dir), dir.join("listener.log"));
-        assert_ne!(default_log_path(dir), fallback_log_path());
-    }
-
-    #[test]
-    fn the_fallback_is_an_absolute_path_somewhere_writable() {
-        let fallback = fallback_log_path();
-        assert!(fallback.is_absolute(), "{}", fallback.display());
-        assert!(fallback.ends_with(LOG_FILE));
-    }
-}

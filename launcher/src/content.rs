@@ -24,16 +24,19 @@ use std::path::{Path, PathBuf};
 const DEFAULT_CONFIG: &str = include_str!("config.toml");
 const DEFAULT_CATALOG: &str = include_str!("catalog.json");
 
-/// True when this is the deployed launcher (its exe sits in `output/`) rather
-/// than a `cargo run` build out of `target/`.
+/// True when this is the deployed launcher rather than a `cargo run` build out
+/// of `target/`.
+///
+/// A real cartridge can sit anywhere the installer or its owner puts it —
+/// often a drive root, which has no folder name at all — so "deployed" cannot
+/// be recognized by the name of the exe's parent folder. What's actually
+/// distinctive about a `cargo run` build is that it lives under a `target/`
+/// directory; nothing else does.
 pub fn running_deployed() -> bool {
     let Ok(exe) = env::current_exe() else {
-        return false;
+        return true;
     };
-    exe.parent()
-        .and_then(|p| p.file_name())
-        .and_then(|n| n.to_str())
-        == Some("output")
+    !exe.components().any(|c| c.as_os_str() == "target")
 }
 
 /// The folder holding `launcher.exe` and all cartridge content.
@@ -66,11 +69,19 @@ pub fn ensure_layout(base: &Path) {
     //
     //   dev      — src/config.toml is the master and output/'s copy is exactly
     //              that, rewritten every run. Edit the one in src/.
-    //   deployed — written once if missing, then never again. The cartridge's
-    //              owner owns its config, and an update must not restyle their
-    //              launcher out from under them.
+    //   deployed — written once if missing, then never rewritten. The
+    //              cartridge's owner owns its config, and an update must not
+    //              restyle their launcher out from under them. The one thing
+    //              that does still happen is `config::sync_defaults` appending
+    //              (commented, inert) documentation for a setting that didn't
+    //              exist when this file was written — see its doc comment.
     if running_deployed() {
-        seed_if_missing(&base.join("config.toml"), DEFAULT_CONFIG);
+        let config_path = base.join("config.toml");
+        seed_if_missing(&config_path, DEFAULT_CONFIG);
+        // A no-op for a config.toml that seed_if_missing just wrote fresh (it
+        // already has every key); this is what catches up one written before
+        // some setting existed.
+        crate::config::sync_defaults(&config_path);
     } else {
         mirror_seed_config(base);
     }

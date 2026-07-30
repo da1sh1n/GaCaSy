@@ -17,22 +17,36 @@
 mod games;
 mod listener;
 
-use eframe::egui;
-
 use crate::app::{App, Mode, Screen};
 use crate::cartridge;
 use crate::payload;
-use crate::volume::{self, human_bytes};
+use crate::volume::human_bytes;
 
 /// Warnings and blockers. Read against both the light and dark egui themes.
 pub const WARN: egui::Color32 = egui::Color32::from_rgb(0xe0, 0xb1, 0x3a);
 pub const BAD: egui::Color32 = egui::Color32::from_rgb(0xd1, 0x3a, 0x3a);
 pub const GOOD: egui::Color32 = egui::Color32::from_rgb(0x5c, 0xb8, 0x5c);
 
-impl eframe::App for App {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+/// Look and feel, applied once before the first frame.
+///
+/// A shade larger than egui's default. This is a wizard read once by someone who
+/// has never seen it, not a tool used daily.
+pub fn configure(ctx: &egui::Context) {
+    ctx.set_fonts(crate::font::definitions());
+    ctx.all_styles_mut(|style| {
+        for (_, font) in style.text_styles.iter_mut() {
+            font.size *= 1.15;
+        }
+        style.spacing.item_spacing = egui::vec2(8.0, 6.0);
+    });
+}
+
+impl App {
+    /// One frame. Called by [`crate::shell`] with the whole window to draw into.
+    pub fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         self.poll_job();
+        self.poll_launcher_probe();
         for draft in &mut self.drafts {
             draft.poll();
         }
@@ -46,7 +60,7 @@ impl eframe::App for App {
                     ui.add_space(8.0);
                     match self.screen {
                         Screen::Home => home(self, ui),
-                        Screen::Volume => volume_screen(self, ui),
+                        Screen::Volume => volume_screen(self, &ctx, ui),
                         Screen::Games => games::screen(self, &ctx, ui),
                         Screen::Review => review(self, ui),
                         Screen::Working => working(self, ui),
@@ -253,79 +267,49 @@ fn home(app: &mut App, ui: &mut egui::Ui) {
     });
 }
 
-/// The drive picker. **Only external drives are selectable** — see
-/// `volume::Eligibility`. Refused drives are still listed, greyed out and with
-/// the reason next to them, because a filter that silently shortens a list is
-/// indistinguishable from a bug to the person looking at it.
-fn volume_screen(app: &mut App, ui: &mut egui::Ui) {
+/// The drive picker. **Every row here can be picked** — `volume::list()` has
+/// already dropped the drive Windows is on and every internal disk.
+///
+/// They used to be listed, greyed out, on the grounds that a filter which
+/// silently shortens a list reads as a bug. The line below does that job
+/// instead: it says once why a drive might be missing, rather than filling the
+/// screen with `C:` and every internal disk as rows that exist to say no.
+fn volume_screen(app: &mut App, ctx: &egui::Context, ui: &mut egui::Ui) {
     if app.volumes.is_empty() {
-        ui.colored_label(WARN, "No drives found. Plug one in and press Rescan drives.");
-        return;
-    }
-    if !app.volumes.iter().any(|v| v.allowed()) {
         ui.colored_label(
             WARN,
-            "No external drive is connected. Plug in a USB stick or drive, then press \
-             Rescan drives.",
+            "No external drive found. Plug in a USB stick or drive, then press Rescan drives.",
         );
-        ui.label(
-            egui::RichText::new(
-                "A cartridge has to be something you can unplug and carry, so internal \
-                 drives are not offered.",
-            )
-            .weak(),
-        );
-        ui.add_space(12.0);
     }
+    ui.label(
+        egui::RichText::new(
+            "A cartridge has to be something you can unplug and carry, so internal drives \
+             and the drive Windows is on are not listed.",
+        )
+        .weak(),
+    );
+    ui.add_space(12.0);
 
     let mut chosen = None;
-    let mut refused_header_shown = false;
-
     for (index, volume) in app.volumes.iter().enumerate() {
-        // `list()` sorts allowed drives first, so this heading is passed exactly
-        // once, on the way into the refused run.
-        if !volume.allowed() && !refused_header_shown {
-            refused_header_shown = true;
-            ui.add_space(10.0);
-            ui.separator();
-            ui.label(egui::RichText::new("Not usable").weak().strong());
-            ui.add_space(4.0);
-        }
-
         ui.horizontal(|ui| {
             let button = egui::Button::new(volume.root.display().to_string());
-            if ui
-                .add_enabled_ui(volume.allowed(), |ui| ui.add_sized([120.0, 28.0], button))
-                .inner
-                .clicked()
-            {
+            if ui.add_sized([120.0, 28.0], button).clicked() {
                 chosen = Some(index);
             }
             ui.vertical(|ui| {
-                if volume.allowed() {
-                    ui.label(volume.summary());
-                    if volume.is_cartridge {
-                        ui.colored_label(GOOD, "Already a cartridge — opens for editing.");
-                    } else {
-                        ui.label(egui::RichText::new(format!("{} drive.", volume.bus)).weak());
-                    }
+                ui.label(volume.summary());
+                if volume.is_cartridge {
+                    ui.colored_label(GOOD, "Already a cartridge — opens for editing.");
                 } else {
-                    ui.label(egui::RichText::new(volume.summary()).weak());
-                    ui.colored_label(
-                        if volume.eligibility == volume::Eligibility::SystemDrive {
-                            BAD
-                        } else {
-                            WARN
-                        },
-                        volume.eligibility.reason(),
-                    );
+                    ui.label(egui::RichText::new(format!("{} drive.", volume.bus)).weak());
                 }
             });
         });
         ui.add_space(4.0);
     }
     if let Some(index) = chosen {
-        app.choose_volume(index);
+        app.choose_volume(ctx, index);
     }
 }
 
@@ -341,6 +325,13 @@ fn review(app: &mut App, ui: &mut egui::Ui) {
     ui.label(egui::RichText::new("On this drive").strong());
     ui.label(app.volume().map(|v| v.summary()).unwrap_or_default());
     ui.add_space(10.0);
+
+    if let Some(new_name) = &plan.label {
+        let was = app.volume().map(|v| v.label.as_str()).unwrap_or_default();
+        ui.label(egui::RichText::new("Rename").strong());
+        ui.label(format!("  {} → {}", quoted(was), quoted(new_name)));
+        ui.add_space(10.0);
+    }
 
     if !plan.remove.is_empty() {
         ui.label(egui::RichText::new("Remove").strong());
@@ -402,6 +393,16 @@ fn review(app: &mut App, ui: &mut egui::Ui) {
         ),
         None => ui.colored_label(GOOD, "It fits."),
     };
+}
+
+/// A drive name for the rename line — quoted, so trailing spaces are visible,
+/// and named rather than shown as `""` when there isn't one.
+fn quoted(name: &str) -> String {
+    if name.is_empty() {
+        "no name".into()
+    } else {
+        format!("\"{name}\"")
+    }
 }
 
 fn working(app: &mut App, ui: &mut egui::Ui) {
