@@ -59,7 +59,15 @@ pub fn resolve_base_dir() -> PathBuf {
 /// refreshes the deployed exe. Cartridge content — covers, games, catalog —
 /// is never touched once present, so hand-dropped files survive every build.
 pub fn ensure_layout(base: &Path) {
-    for sub in ["games", "images", "logs", "EBWebView"] {
+    // Cover art and WebView2's cache both live under assets/ so the cartridge
+    // root holds only what a person put there: the exe, the two data files,
+    // their games, and the logs.
+    //
+    // `images/` is deliberately NOT created any more. An older cartridge that
+    // has one keeps it, and `assets::handle_request` still serves from it —
+    // but a fresh cartridge should not be given an empty folder it will never
+    // use just because the previous layout had one.
+    for sub in ["games", "logs", "assets/images", "assets/EBWebView"] {
         fs::create_dir_all(base.join(sub))
             .unwrap_or_else(|e| panic!("failed to create output/{sub}/: {e}"));
     }
@@ -95,13 +103,29 @@ pub fn ensure_layout(base: &Path) {
 /// the live UI assets in `assets::handle_request`, so editing src/config.toml
 /// and re-running takes effect even if the binary itself wasn't rebuilt.
 ///
+/// The three order keys survive the copy. The seed owns look and feel; the
+/// *launcher* owns `order_mode`, `usage_order` and `user_order` — it writes them
+/// as games are played and covers arranged — and a mirror that flattened them
+/// back to the seed's empty lists every run would make that half of the launcher
+/// impossible to try out in the repo. Deployed, this function doesn't run at all
+/// and the question never arises.
+///
 /// A failure here is not fatal: the previous copy is still a usable config.
 fn mirror_seed_config(base: &Path) {
+    // Read before overwriting — this is the only moment the old values exist.
+    let carried = crate::config::load(base);
+
     let live = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("src")
         .join("config.toml");
     let contents = fs::read_to_string(&live).unwrap_or_else(|_| DEFAULT_CONFIG.to_string());
-    let _ = fs::write(base.join("config.toml"), contents);
+    if fs::write(base.join("config.toml"), contents).is_err() {
+        return;
+    }
+
+    crate::config::store(base, "order_mode", carried.order_mode.into());
+    crate::config::store(base, "usage_order", crate::config::ids(&carried.usage_order));
+    crate::config::store(base, "user_order", crate::config::ids(&carried.user_order));
 }
 
 fn seed_if_missing(path: &Path, contents: &str) {

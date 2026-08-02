@@ -271,7 +271,7 @@ Matches the launcher's deployed layout
   launcher.exe     <- the app, from the embedded payload; the signature rides inside it
   config.toml      <- look and feel only
   catalog.json     <- the game list the installer just built
-  images/          <- one cover per game
+  assets/images/   <- one cover per game
   games/           <- the copied game installs
 ```
 
@@ -282,7 +282,7 @@ inside `launcher.exe`, which the listener checks against a key compiled into its
 One part of a cartridge is not in this layout at all: its **name**, which is the drive's volume
 label. See [Naming a cartridge](#naming-a-cartridge).
 
-`EBWebView/` is **not** created by the installer — the launcher makes it on first run.
+`assets/EBWebView/` is **not** created by the installer — the launcher makes it on first run.
 
 ### Executable auto-detection
 
@@ -311,7 +311,7 @@ total it produces is what the free-space check and the progress bar both use.
 
 ### Cover images
 
-One image per game, chosen by the user, copied to `images/<slug>.<ext>`. The extension is
+One image per game, chosen by the user, copied to `assets/images/<slug>.<ext>`. The extension is
 kept rather than forced to `.png`: the launcher hands the path to the webview, which goes by
 content and not by name, and renaming a `.webp` to `.png` only makes the cartridge harder to
 read later.
@@ -331,7 +331,7 @@ reject formats the webview renders perfectly well.
 
 `catalog.json` is the array of `{ name, exe, image }` the launcher deserializes into its
 `Game` struct. Paths are **relative to the cartridge root** (`games/bg3/bg3.exe`,
-`images/bg3.png`), and `name` defaults to the game folder's name, editable by the user.
+`assets/images/bg3.png`), and `name` defaults to the game folder's name, editable by the user.
 
 ## Job 2 — Install the listener
 

@@ -6,28 +6,47 @@
 #
 # On a real cartridge there is no src/, and this file is written once if
 # missing and never touched again: whoever owns the cartridge owns its config.
-# The one exception is a setting that didn't exist when the file was first
-# written — the launcher appends a commented-out line for it (already at its
-# default) so it's there to find and uncomment, instead of silently applying
-# with no trace of it in the file.
+# There are two exceptions:
 #
-# The window wraps the covers: each cover aims for a fraction of your display
-# and the window is sized around the row of them, bounded by two caps. All
-# three fractions live in src/constants.rs (IMAGE_WIDTH_FRACTION,
-# MAX_WIDTH_FRACTION, MAX_HEIGHT_FRACTION), together with every other number
-# this file doesn't expose. The covers scale to fit automatically.
+#   - a setting that didn't exist when the file was first written — the launcher
+#     appends a commented-out line for it (already at its default) so it's there
+#     to find and uncomment, instead of silently applying with no trace of it in
+#     the file.
+#   - the three order_* settings at the bottom, which the launcher writes as
+#     games are played and covers arranged. They are yours to edit too; the
+#     launcher just keeps them current between edits. Everything else here it
+#     only ever reads. (This split holds in the repo as well: `cargo run`
+#     rewrites output/config.toml from this file but carries those three keys
+#     across, so a dev session doesn't forget what you last played.)
+#
+# The window wraps the covers: each cover is shown at the size the art was drawn
+# at (600x900), and the window is sized around a row of them. It only shrinks
+# them when your display can't hold three at that size. How many games there are
+# decides how WIDE the window is — never how big a cover is — between a floor of
+# three covers and whatever fits your screen; past that the row scrolls sideways
+# and a search box appears. The caps and that floor live in src/constants.rs
+# (MAX_WIDTH_FRACTION, MAX_HEIGHT_FRACTION, MIN_VISIBLE_COVERS), together with
+# every other number this file doesn't expose.
 
-# Show the game's name under its cover card. Off by default since cover
-# art usually already has the title on it.
-show_captions = false
+# Show the selected game's name, on one shared line under the row. One line
+# rather than a label per cover: a name under all thirty is noise, and the
+# only name worth reading is the one you are pointing at.
+show_captions = true
 
 # ── Look and feel ──────────────────────────────────────────────────────────
 # All sizes are in pixels; colors are quoted strings holding any CSS color
 # (hex like "#1b1229", or "rgba(...)" for translucency). Missing or invalid
 # values fall back to the defaults shown here.
 
-# Empty space between the window edge and the covers.
-border_gap = 36
+# Empty space between the window edge and the covers — at the sides and below
+# them. Not above: the toolbar strip along the top already includes the gap
+# under itself, and spending a margin there too put the same space in twice.
+#
+# The bottom one has a job beyond breathing room. It is where the selected
+# game's name and the scroll bar live, and the name's size is taken from
+# whatever height is left over — so a smaller number here means a smaller name,
+# not a cramped one.
+border_gap = 44
 
 # Gap between adjacent covers.
 image_gap = 32
@@ -35,18 +54,56 @@ image_gap = 32
 # How rounded each cover's corners are (0 = square).
 corner_radius = 14
 
-# Window / page background behind the covers.
-background_color = "#1b1229"
+# How rounded the window's own corners are (0 = square).
+#
+# On Windows 11 the corners are the system's own and this number is ignored —
+# the compositor rounds the window and picks the radius, which is what makes the
+# launcher match every other window on that machine. On Windows 10, which has no
+# such setting, the launcher clips the window to this radius itself; the corner
+# is a touch stair-stepped there, because the clip has no partial pixels.
+window_corner_radius = 12
 
-# Shadow around each cover. It never reaches further than shadow_size.
-#   shadow_size  — how far the shadow reaches out from the cover edge.
-#   shadow_fade  — solid color for this many px from the edge, then it fades
-#                  smoothly to nothing by shadow_size (0 = fades the whole way;
-#                  must be <= shadow_size).
-#   shadow_color — its color; use the rgba alpha to set how dark it is.
-shadow_size = 20
+# ── The palette ────────────────────────────────────────────────────────────
+# Three colors, in the proportions the 60/30/10 rule is named for. Between them
+# they carry the whole launcher: everything that is not cover art, and not one
+# of the two warning colors further down, is one of these or a shade worked out
+# from them.
+#
+#   primary    60%  the window behind everything
+#   secondary  30%  the shadow under each cover, control outlines, and the
+#                   plate that shows when a cover's art is missing
+#   accent     10%  text, the selected cover, the close button
+#
+# Two of those shades are not the color exactly as you set it, and it is worth
+# knowing why before you wonder where the difference came from. An accent picked
+# to look right filling the close button is usually too close to the primary to
+# read as small text on it; a secondary picked to look right as a shadow is
+# usually too close to show up as a hairline. So each gets lifted just far
+# enough to clear that bar and no further — same hue, enough contrast. Pick
+# three colors you like and the rest follows.
+primary_color = "#191325"
+secondary_color = "#3D1F37"
+accent_color = "#925E37"
+
+# Shadow around each cover, in secondary_color. It never reaches further than
+# shadow_size.
+#   shadow_size — how far the shadow reaches out from the cover edge.
+#   shadow_fade — solid color for this many px from the edge, then it fades
+#                 smoothly to nothing by shadow_size (0 = fades the whole way;
+#                 must be <= shadow_size).
+shadow_size = 28
 shadow_fade = 2
-shadow_color = "rgba(220, 139, 101, 0.8)"
+
+# The toolbar across the top — the order control, the arrange toggle, and the
+# search box that appears once there are more covers than fit — and the bar
+# under a row too long to fit at once.
+#
+# Both blank, meaning "take it from the palette above". Naming a color here
+# overrides that, but a color that suits one palette rarely suits another, so
+# it is worth changing the three above first and seeing whether you still want
+# to.
+toolbar_color = ""
+scrollbar_color = ""
 
 # ── Launching ──────────────────────────────────────────────────────────────
 # What the player sees when a game is chosen, and when one can't start. Full
@@ -57,21 +114,16 @@ shadow_color = "rgba(220, 139, 101, 0.8)"
 # the centred cover included. Use the rgba alpha to set how dark it gets.
 overlay_color = "rgba(0, 0, 0, 0.45)"
 
-# The ring that spins in the middle of the screen while waiting, and the line
-# of text under it naming what is starting. Both are plain CSS colors, so the
-# text's alpha is how faint it is.
-loading_ring_color = "#ffffff"
-loading_text_color = "rgba(255, 255, 255, 0.6)"
+# The progress line that runs under the cover of a game that's starting, and
+# the line of text below it naming what that game is.
+#
+# Blank takes both from the palette. loading_ring_color is named for the
+# spinning ring this used to be; the name is kept so that a cartridge which
+# already sets it keeps its color rather than silently reverting on an update.
+loading_ring_color = ""
+loading_text_color = ""
 
-# How many pieces the ring is cut into. The cuts are half as wide as the ring
-# is thick and go straight across it, so each piece has two flat ends.
-loading_ring_segments = 12
-
-# How fast the ring turns, in full turns per second. Anything below 0.05 is
-# raised to 0.05, so the ring can be as slow as you like but never stopped.
-loading_ring_speed = 0.2
-
-# Pixels between the bottom of the ring and the line of text under it.
+# Pixels between the progress line and the line of text under it.
 loading_text_gap = 12
 
 # A game that was chosen but failed to start: its cover keeps this border and
@@ -92,3 +144,35 @@ missing_dim = 0.45
 # real GUI game is unaffected either way, since it has no console to begin
 # with.
 show_console_window = false
+
+# ── Cover order ────────────────────────────────────────────────────────────
+# The three settings the launcher writes as well as reads. Change them here or
+# from the toolbar in the launcher itself — either way this file is what's true.
+
+# How the covers are ordered:
+#   "usage"      — most recently played first, from usage_order below
+#   "alphabetic" — by name, A→Z
+#   "catalog"    — the order they appear in catalog.json
+#   "user"       — the order in user_order below
+# Anything else falls back to "usage". The order control at the left of the
+# toolbar sets this, and writes it back here.
+order_mode = "usage"
+
+# The two orders, as lists of ids. An id is a game's place in catalog.json —
+# 0 is the first entry, 1 the second, and so on. (If the launcher has refused an
+# entry for naming a file outside the cartridge, it is not counted; check
+# logs/launcher.log if the ids look off by one.)
+#
+# Neither list has to be complete or tidy. Ids that don't exist are ignored,
+# repeats are dropped, and any game the list doesn't mention goes at the end in
+# catalog order — so adding a game to the cartridge doesn't invalidate either
+# list, and `usage_order = [2]` simply means "number 2 first, then the rest".
+
+# Most recently played first. The launcher rewrites this each time a game
+# actually starts; a game that fails to start doesn't move.
+usage_order = []
+
+# Hand-arranged order, used when order_mode = "user". Set it here, or switch the
+# launcher to "user" and press the toggle beside the order control to drag the
+# covers around by the grip that appears on each one.
+user_order = []

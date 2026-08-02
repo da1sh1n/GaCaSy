@@ -13,6 +13,25 @@
 //!
 //! Nothing here blocks. Waiting on a game is [`crate::launch`]'s job, on a
 //! worker thread, because the UI thread has an animation to keep painting.
+//!
+//! # The IPC surface
+//!
+//! Four messages, and deliberately no general "set this setting" one — the page
+//! can start a game, close the window, and change the two things about the row
+//! that are its own business:
+//!
+//! ```text
+//! close             the close button, and the page's own outro when a game is up
+//! launch:<id>       a cover was chosen
+//! mode:<name>       the order control changed; one of `order::MODES`
+//! order:<a,b,c>     covers were dragged into a new order in arrange mode
+//! ```
+//!
+//! The last two are the only route by which the page writes to the disk, and
+//! both are checked here rather than trusted: an unknown mode and an id list
+//! that isn't a permutation are both rejected/repaired before anything is
+//! stored, so a bug in the page can't leave a config a later run has to make
+//! sense of.
 
 use std::path::Path;
 use std::thread;
@@ -28,7 +47,7 @@ use crate::catalog;
 use crate::config::Config;
 use crate::constants::*;
 use crate::window;
-use crate::{assets, config, launch};
+use crate::{assets, config, launch, order};
 
 enum UserEvent {
     CloseRequested,
@@ -49,11 +68,15 @@ pub fn run(base_dir: &Path) -> wry::Result<()> {
     let init_script = init_script(base_dir, &config, &games);
 
     // WebView2's user-data folder is the engine's only on-disk footprint. We
-    // point it at output/ itself, so the engine drops its (fixed-name)
-    // EBWebView cache folder straight in there rather than under an extra
-    // wrapper. content::ensure_layout pre-creates that folder so it's present
+    // point it at output/assets/, so the engine drops its (fixed-name)
+    // EBWebView cache folder in there beside the cover art rather than in the
+    // cartridge root. content::ensure_layout pre-creates it so it's present
     // from the first launch.
-    let mut web_context = WebContext::new(Some(base_dir.to_path_buf()));
+    //
+    // Worth knowing before reaching for `rm -rf`: EBWebView is regenerable
+    // cache and images/ next to it is not, so assets/ as a whole is NOT safe
+    // to delete even though one of its two children always is.
+    let mut web_context = WebContext::new(Some(base_dir.join("assets")));
 
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
@@ -74,6 +97,9 @@ pub fn run(base_dir: &Path) -> wry::Result<()> {
         .build(&event_loop)
         .expect("failed to create window");
 
+    // Before it is shown at its final place, so the shape is never seen
+    // changing. Undecorated windows are bare rectangles otherwise.
+    window::round_corners(&window, config.window_corner_radius);
     window::center(&window);
     // Only now, once it is the size and in the place it will stay: raising a
     // window that is still being moved shows the move.
@@ -81,6 +107,17 @@ pub fn run(base_dir: &Path) -> wry::Result<()> {
 
     let base_for_launch = base_dir.to_path_buf();
     let base_for_protocol = base_dir.to_path_buf();
+    // The IPC handler and the event loop both write settings, and they are two
+    // different closures with two different lifetimes — hence two copies of the
+    // path rather than one shared one.
+    let base_for_settings = base_dir.to_path_buf();
+    let base_for_usage = base_dir.to_path_buf();
+    // Read once here so the event loop can promote into it without re-reading
+    // config.toml on the way out. Nothing else writes these while we run: the
+    // single-instance mutex means there is no second launcher, and the page can
+    // only reach the file through the messages below.
+    let mut usage_order = config.usage_order.clone();
+    let game_count = games.len();
 
     let webview = WebViewBuilder::new_with_web_context(&mut web_context)
         .with_custom_protocol("app".into(), move |_webview_id, request| {
@@ -95,13 +132,39 @@ pub fn run(base_dir: &Path) -> wry::Result<()> {
              --disable-component-update --disable-default-apps --disable-sync \
              --no-default-browser-check --renderer-process-limit=1",
         )
-        .with_background_color((0, 0, 0, 255))
+        .with_background_color(background_rgba(&config.primary_color))
         .with_ipc_handler(move |request| {
             let body = request.body().as_str();
             if body == "close" {
                 let _ = proxy.send_event(UserEvent::CloseRequested);
                 return;
             }
+
+            // The order control. Checked against the four names rather than
+            // stored as given: a mode this launcher doesn't know is a bug on the
+            // page's side, and writing it down would turn one bad message into a
+            // config that reads wrong forever.
+            if let Some(mode) = body.strip_prefix("mode:") {
+                if order::is_mode(mode) {
+                    config::store(&base_for_settings, "order_mode", mode.into());
+                }
+                return;
+            }
+
+            // A drag in arrange mode, as the ids in their new left-to-right
+            // order. Normalized before storing, so whatever the page sends is
+            // written down as a complete, duplicate-free permutation — the file
+            // never holds a list a later run has to repair.
+            if let Some(list) = body.strip_prefix("order:") {
+                let sent: Vec<usize> = list
+                    .split(',')
+                    .filter_map(|id| id.trim().parse::<usize>().ok())
+                    .collect();
+                let normalized = order::normalize(&sent, game_count);
+                config::store(&base_for_settings, "user_order", config::ids(&normalized));
+                return;
+            }
+
             let Some(index) = body.strip_prefix("launch:") else {
                 return;
             };
@@ -172,6 +235,18 @@ pub fn run(base_dir: &Path) -> wry::Result<()> {
                 );
                 let _ = webview.evaluate_script(&script);
                 if ok {
+                    // "Last opened" means opened, not attempted: a game that
+                    // failed to start has told the player nothing about what
+                    // they want to play next, and pushing it to the front of the
+                    // row would be the launcher drawing the wrong conclusion
+                    // from its own failure.
+                    //
+                    // Written here, while the page plays its outro, rather than
+                    // on the way out — a launcher killed during the outro has
+                    // still recorded what it started. A few hundred bytes onto
+                    // a stick, and nothing waits on the result.
+                    usage_order = order::promote(&usage_order, game_count, index);
+                    config::store(&base_for_usage, "usage_order", config::ids(&usage_order));
                     exit_deadline = Some(Instant::now() + LAUNCH_EXIT_FALLBACK);
                 }
             }
@@ -207,7 +282,37 @@ pub fn run(base_dir: &Path) -> wry::Result<()> {
     });
 }
 
-/// Everything the page needs before its own scripts run, as three globals.
+/// The window's own fill, taken from `background_color` so the frame the page
+/// has not painted yet is already the right colour.
+///
+/// This used to be a hard-coded black, which was invisible while the whole
+/// stylesheet was inline in `index.html` — the page's first paint carried the
+/// configured background. Now that `style.css` is a separate `app://` request,
+/// there is a frame in between, and on a cartridge with a light background a
+/// black one reads as a flash.
+///
+/// Only `#rgb` and `#rrggbb` are understood. `config.toml` legitimately allows
+/// any CSS colour string (`rgba(...)`, a named colour), and anything this can't
+/// read falls back to black — one unstyled frame is the old behaviour, not a
+/// new failure, and guessing at a colour we can't parse would be worse.
+fn background_rgba(color: &str) -> wry::RGBA {
+    let hex = color.trim().strip_prefix('#').unwrap_or("");
+    let digits: Vec<u8> = match hex.len() {
+        // #rgb is shorthand for #rrggbb — each digit doubled, not zero-padded.
+        3 => hex.chars().filter_map(|c| c.to_digit(16)).map(|d| (d * 17) as u8).collect(),
+        6 => (0..3)
+            .filter_map(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).ok())
+            .collect(),
+        _ => return (0, 0, 0, 255),
+    };
+    // A short vec means a non-hex character was dropped above.
+    match digits[..] {
+        [r, g, b] => (r, g, b, 255),
+        _ => (0, 0, 0, 255),
+    }
+}
+
+/// Everything the page needs before its own scripts run, as four globals.
 ///
 /// Handed over this way rather than fetched: `fetch()`ing catalog.json from the
 /// page would hit CORS restrictions. serde_json handles escaping, so a color or
@@ -217,10 +322,13 @@ fn init_script(base_dir: &Path, config: &Config, games: &[catalog::Game]) -> Str
         "borderGap": config.border_gap,
         "imageGap": config.image_gap,
         "cornerRadius": config.corner_radius,
-        "backgroundColor": config.background_color,
+        // The palette. Everything else the page draws that isn't cover art or
+        // one of the two semantic states is one of these or a shade of one.
+        "primaryColor": config.primary_color,
+        "secondaryColor": config.secondary_color,
+        "accentColor": config.accent_color,
         "shadowSize": config.shadow_size,
         "shadowFade": config.shadow_fade,
-        "shadowColor": config.shadow_color,
         "errorBorderColor": config.error_border_color,
         "errorBorderWidth": config.error_border_width,
         "errorTextColor": config.error_text_color,
@@ -229,19 +337,36 @@ fn init_script(base_dir: &Path, config: &Config, games: &[catalog::Game]) -> Str
         "overlayColor": config.overlay_color,
         "loadingRingColor": config.loading_ring_color,
         "loadingTextColor": config.loading_text_color,
-        "loadingRingSegments": config.loading_ring_segments,
-        "loadingRingSpeed": config.loading_ring_speed,
         "loadingTextGap": config.loading_text_gap,
-        // Not a config.toml knob: a timing of the launcher's own, sent along
-        // with the look-and-feel so the page reads one object. Milliseconds,
-        // because that is what the page's timers take.
+        "toolbarColor": config.toolbar_color,
+        "scrollbarColor": config.scrollbar_color,
+        // Not config.toml knobs: two of the launcher's own numbers, sent along
+        // with the look-and-feel so the page reads one object. The toolbar band
+        // is the strip `window::size` reserved across the top and the page must
+        // fit its covers under; sending it beats the page guessing at a height
+        // Rust has already committed to.
+        "toolbarBand": TOOLBAR_BAND,
+        // Milliseconds, because that is what the page's timers take.
         "minLoadingAfterFail": MIN_LOADING_AFTER_FAIL.as_millis() as u64,
     });
 
+    // The order the covers go in. Handed over raw — the mode as the config had
+    // it and both id lists exactly as written — because the page re-sorts live
+    // when the order control changes and so has to be able to work all four modes out
+    // for itself. It repairs the lists the same way `order::normalize` does; see
+    // that module for why the rule is written down twice.
+    let order_state = serde_json::json!({
+        "mode": config.order_mode,
+        "usage": config.usage_order,
+        "user": config.user_order,
+    });
+
     format!(
-        "window.__GAMES__ = {}; window.__SHOW_CAPTIONS__ = {}; window.__UI__ = {};",
+        "window.__GAMES__ = {}; window.__SHOW_CAPTIONS__ = {}; window.__UI__ = {}; \
+         window.__ORDER__ = {};",
         catalog::payload(base_dir, games),
         config.show_captions,
-        ui_settings
+        ui_settings,
+        order_state
     )
 }

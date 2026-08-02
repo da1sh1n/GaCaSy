@@ -8,9 +8,9 @@
 //!
 //! The producer side of `../../launcher/src/catalog.rs`: an array of
 //! `{ name, exe, image }` with both paths **relative to the cartridge root**
-//! (`games/bg3/bg3.exe`, `images/bg3.png`). The launcher joins them onto its own
-//! folder, so an absolute path here would produce a cartridge that only works on
-//! the machine that made it.
+//! (`games/bg3/bg3.exe`, `assets/images/bg3.png`). The launcher joins them onto
+//! its own folder, so an absolute path here would produce a cartridge that only
+//! works on the machine that made it.
 //!
 //! Separators are always `/`. Windows joins either kind, and a cartridge with
 //! backslashes in its catalog would stop working the day a Linux launcher reads
@@ -23,7 +23,13 @@ use serde::{Deserialize, Serialize};
 
 pub const CATALOG_FILE: &str = "catalog.json";
 pub const GAMES_DIR: &str = "games";
-pub const IMAGES_DIR: &str = "images";
+/// Cover art, under the cartridge's `assets/` folder alongside WebView2's own
+/// cache — so the root holds only what a person put there.
+///
+/// This was a bare `images/` and a cartridge written by an older installer
+/// still says so in its catalog. Nothing needs migrating: the launcher serves
+/// whatever path the catalog names, and accepts both prefixes.
+pub const IMAGES_DIR: &str = "assets/images";
 
 /// One row of the catalog. Field names and types match the launcher's `Game`
 /// exactly; it is a hard error there if they don't.

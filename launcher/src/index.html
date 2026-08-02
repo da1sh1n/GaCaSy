@@ -5,706 +5,87 @@
   This file is part of GaCaSy, licensed under the GNU General Public License
   v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
   or <https://www.gnu.org/licenses/> for details.
+
+  The markup only. Look lives in style.css, behaviour in app.js — all three
+  are served over app:// from src/, live in dev and from rust-embed on a
+  deployed cartridge. The spacing numbers shared with Rust are documented at
+  the top of those two files; see src/constants.rs for why they are duplicated.
 -->
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
 <title>Cartridge Launcher</title>
-<style>
-  :root {
-    color-scheme: dark;
-    /* Look-and-feel knobs. These fallbacks match the config.toml defaults; the
-       script below overrides them from window.__UI__ (fed by config.toml). */
-    --background-color: #1b1229;
-    --image-gap: 32px;
-    --corner-radius: 14px;
-    --shadow: 0 0 24px 0 rgba(0, 0, 0, 0.55);
-    --overlay-color: rgba(0, 0, 0, 0.45);
-    --loading-ring-color: #ffffff;
-    --loading-text-color: rgba(255, 255, 255, 0.4);
-    --error-border-color: #e0b13a;
-    --error-border-width: 3px;
-    --error-text-color: #e0b13a;
-    --missing-sign-color: #d13a3a;
-    --missing-dim: 0.45;
-    /* On :root rather than on #ring itself, because the status line under the
-       ring is positioned from it too. */
-    --ring-size: 90px;
-    /* One turn. The config knob is the other way round (turns per second), so
-       this is 1 / loading_ring_speed. */
-    --ring-spin-duration: 3.333s;
-    --loading-text-gap: 12px;
-    /* Thickness of the "missing" sign's stroke, recomputed per cover in
-       layout() so it stays proportional at any cover size. */
-    --sign-stroke: 6px;
-  }
-
-  html, body {
-    margin: 0;
-    padding: 0;
-    width: 100%;
-    height: 100%;
-    background: var(--background-color);
-    overflow: hidden;
-  }
-
-  body {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-family: "Segoe UI", system-ui, sans-serif;
-  }
-
-  #close-btn {
-    position: fixed;
-    top: 10px;
-    right: 10px;
-    width: 28px;
-    height: 28px;
-    border: none;
-    border-radius: 4px;
-    background: transparent;
-    color: #999999;
-    font-size: 1rem;
-    line-height: 28px;
-    cursor: pointer;
-    z-index: 10;
-  }
-
-  #close-btn:hover {
-    background: #b0202f;
-    color: #ffffff;
-  }
-
-  /* A row of covers, centered in the window by the body. The gap is static;
-     each cover's pixel size is computed in JS to fit the window. */
-  #grid {
-    display: inline-flex;
-    gap: var(--image-gap);
-    align-items: center;
-  }
-
-  /* What a cartridge with an empty catalog says instead of showing a row of
-     covers. Same muted grey and size as a caption: it is a statement of fact
-     about the cartridge, not a warning, and shouldn't be dressed as one. */
-  #empty {
-    display: none;
-    color: #cfcfcf;
-    font-size: 0.85rem;
-    text-align: center;
-  }
-
-  .card {
-    appearance: none;
-    border: none;
-    background: none;
-    padding: 0;
-    position: relative;
-    flex: 0 0 auto;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 10px;
-    cursor: pointer;
-    font-family: inherit;
-    transition: transform 0.15s ease, opacity 0.25s ease;
-  }
-
-  .card:not(:disabled):hover,
-  .card:not(:disabled):focus-visible {
-    transform: translateY(-6px);
-  }
-
-  .card:focus-visible {
-    outline: 2px solid #6ea8ff;
-    outline-offset: 4px;
-    border-radius: 16px;
-  }
-
-  .card:disabled {
-    cursor: default;
-  }
-
-  /* Wraps the cover so the "missing" sign has something to sit on top of.
-     line-height: 0 keeps it exactly the image's size. */
-  .cover {
-    position: relative;
-    display: block;
-    line-height: 0;
-  }
-
-  .card img {
-    display: block;
-    border-radius: var(--corner-radius);
-    background: #151515;
-    box-shadow: var(--shadow);
-  }
-
-  .card .caption {
-    max-width: 100%;
-    line-height: 20px;
-    color: #cfcfcf;
-    font-size: 0.85rem;
-    text-align: center;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  /* Why a cover can't be played, or didn't start. Hidden until there is
-     something to say, and independent of the show_captions setting.
-     Positioned out of the flow, in the border gap under the cover: a note on
-     one card must not make that card taller and knock its cover out of line
-     with the others. */
-  .card .note {
-    display: none;
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0;
-    right: 0;
-    /* Wraps to a second line rather than ellipsising: the message is the whole
-       point of the state, and a cover is only ~260px wide. Two lines is what
-       the border gap under the cover has room for. */
-    line-height: 15px;
-    max-height: 30px;
-    color: var(--error-text-color);
-    font-size: 0.75rem;
-    text-align: center;
-    overflow: hidden;
-  }
-
-  .card.unavailable .note,
-  .card.failed .note {
-    display: block;
-  }
-
-  /* ── A game whose exe isn't on the cartridge ────────────────────────── */
-
-  .card.unavailable img {
-    filter: brightness(var(--missing-dim));
-  }
-
-  /* Circle with a diagonal bar through it, drawn over the middle of the
-     cover. Sized as a fraction of the cover so it scales with it. */
-  .sign {
-    display: none;
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    box-sizing: border-box;
-    width: 38%;
-    aspect-ratio: 1;
-    transform: translate(-50%, -50%);
-    border: var(--sign-stroke) solid var(--missing-sign-color);
-    border-radius: 50%;
-  }
-
-  .sign::after {
-    content: "";
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    width: 100%;
-    height: var(--sign-stroke);
-    background: var(--missing-sign-color);
-    transform: translate(-50%, -50%) rotate(-45deg);
-  }
-
-  .card.unavailable .sign {
-    display: block;
-  }
-
-  /* ── A cover whose art couldn't be loaded ───────────────────────────── */
-  /* The <img> is hidden rather than left to draw the webview's own
-     broken-image glyph, which sits in the corner, ignores the rounded corners
-     and reads as a page that failed to load rather than as a stated fact.
-     Hidden and not removed: it still holds the box the sizing math gave it, so
-     the cover keeps its place in the row and the sign stays centred on it.
-     The plate and shadow move up to .cover, since a hidden element draws
-     neither. */
-
-  .card.no-cover img {
-    visibility: hidden;
-  }
-
-  .card.no-cover .cover {
-    background: #151515;
-    border-radius: var(--corner-radius);
-    box-shadow: var(--shadow);
-  }
-
-  /* ── A game that was chosen but failed to start ─────────────────────── */
-  /* An outline rather than a border: it doesn't take part in layout, so a
-     marked cover stays exactly the size the sizing math gave it. */
-
-  .card.failed .cover {
-    outline: var(--error-border-width) solid var(--error-border-color);
-    outline-offset: 3px;
-    border-radius: var(--corner-radius);
-  }
-
-  /* ── The launch transition ──────────────────────────────────────────── */
-
-  /* Cards are pinned to their on-screen positions before anything moves, so
-     the others can leave without shifting the chosen one. */
-  .card.pinned {
-    position: fixed;
-    margin: 0;
-    transition: transform 0.35s cubic-bezier(0.2, 0.7, 0.2, 1),
-                opacity 0.25s ease;
-  }
-
-  .card.pinned:hover,
-  .card.pinned:focus-visible {
-    transform: none;
-  }
-
-  /* No focus ring once the launch is under way: the cover is being presented,
-     not offered, and a keyboard user would otherwise watch its focus outline
-     fly to the centre of the screen with it. */
-  .card.pinned:focus-visible {
-    outline: none;
-  }
-
-  .card.dimmed {
-    opacity: 0;
-    transform: scale(0.92);
-    pointer-events: none;
-  }
-
-  .card.chosen {
-    z-index: 1;
-    pointer-events: none;
-  }
-
-  /* Over everything, the chosen cover included: what's wanted is the whole
-     screen dimming behind the loading indicator, not a spotlit cover. */
-  #scrim {
-    position: fixed;
-    inset: 0;
-    z-index: 2;
-    background: var(--overlay-color);
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.25s ease, background-color 0.3s ease;
-  }
-
-  body.launching #scrim {
-    opacity: 1;
-  }
-
-  /* The loading indicator: a segmented ring in the middle of the screen, with
-     the status line small and faint along the bottom. Both sit above the scrim
-     so they stay bright while everything under them dims. */
-
-  /* One solid ring with gaps cut out of it, rather than a dozen separate dots:
-     the segments are dashes along the stroke, so their ends are cut square by
-     the ring's own radius — flat sides, not round dots. The dash pattern is
-     computed in JS from the segment count. */
-  #ring {
-    position: fixed;
-    /* Centred with left/top rather than a translate, because the element's own
-       transform is spoken for by the spin animation. */
-    left: calc(50% - var(--ring-size) / 2);
-    top: calc(50% - var(--ring-size) / 2);
-    width: var(--ring-size);
-    height: var(--ring-size);
-    /* Linear, always: the ring is symmetric under a segment's worth of
-       rotation, so any easing lands each segment back on its neighbour's
-       position and the motion reads as a stutter rather than a turn. */
-    animation: spin var(--ring-spin-duration) linear infinite;
-  }
-
-  #ring circle {
-    fill: none;
-    stroke: var(--loading-ring-color);
-  }
-
-  /* Directly under the ring, which is centred, so this hangs off the middle of
-     the screen too rather than off the window's bottom edge. */
-  #status {
-    position: fixed;
-    left: 0;
-    right: 0;
-    top: calc(50% + var(--ring-size) / 2 + var(--loading-text-gap));
-    color: var(--loading-text-color);
-    font-size: 0.75rem;
-    text-align: center;
-  }
-
-  /* Hidden with visibility rather than display so they can fade out as well
-     as in. */
-  #ring,
-  #status {
-    z-index: 3;
-    pointer-events: none;
-    visibility: hidden;
-    opacity: 0;
-    transition: opacity 0.25s ease, visibility 0s linear 0.25s;
-  }
-
-  body.launching #ring,
-  body.launching #status {
-    visibility: visible;
-    opacity: 1;
-    transition: opacity 0.25s ease;
-  }
-
-  @keyframes spin {
-    to { transform: rotate(360deg); }
-  }
-
-  /* The outro, once the game's window is up: the screen goes to black and the
-     cover lifts away, covering the moment the launcher exits. */
-  body.finishing #scrim {
-    background: #000000;
-  }
-
-  body.finishing #ring,
-  body.finishing #status {
-    opacity: 0;
-  }
-
-  body.finishing .card.chosen {
-    opacity: 0;
-    transition: transform 0.3s ease-in, opacity 0.3s ease-in;
-  }
-</style>
+<link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <button id="close-btn" title="Close" onclick="window.ipc.postMessage('close')">&#10005;</button>
-  <div id="grid"></div>
-  <!-- Shown in place of the grid when the catalog is empty. Hidden by default:
-       the common case is a cartridge with games, and a message that flashes
-       before the covers appear would read as an error that wasn't one. -->
-  <div id="empty">No games on this cartridge</div>
+  <!-- Everything in one row, close button included. It used to be fixed to the
+       window corner, outside this bar, which cost #search a margin to clear it
+       and made the corner the only part of the window not on a grid. -->
+  <div id="toolbar">
+    <div id="toolbar-left">
+      <!-- A real control rather than a <select>. The native popup is drawn by
+           Windows, not by this page: it arrives with its own font, its own
+           metrics and its own corner radius in the middle of a window that has
+           otherwise been drawn from scratch, and it was the single loudest
+           "this is a web page" moment in the product.
+
+           Four equal-width segments, so the pill that marks the active one is
+           one fixed size and only ever moves — see #mode-pill in style.css. -->
+      <div id="mode" role="radiogroup" aria-label="How the covers are ordered">
+        <span id="mode-pill" aria-hidden="true"></span>
+        <button type="button" role="radio" data-mode="usage" aria-checked="true">Recent</button>
+        <button type="button" role="radio" data-mode="alphabetic" aria-checked="false">A-Z</button>
+        <button type="button" role="radio" data-mode="catalog" aria-checked="false">Cartridge</button>
+        <button type="button" role="radio" data-mode="user" aria-checked="false">Custom</button>
+      </div>
+      <button id="arrange" type="button" aria-pressed="false" title="Arrange the covers by hand">
+        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+          <circle cx="3.5" cy="2" r="1.15" /><circle cx="8.5" cy="2" r="1.15" />
+          <circle cx="3.5" cy="6" r="1.15" /><circle cx="8.5" cy="6" r="1.15" />
+          <circle cx="3.5" cy="10" r="1.15" /><circle cx="8.5" cy="10" r="1.15" />
+        </svg>
+      </button>
+    </div>
+    <div id="toolbar-right">
+      <input id="search" type="search" placeholder="Search" aria-label="Search games" />
+      <button id="close-btn" type="button" title="Close" onclick="window.ipc.postMessage('close')">&#10005;</button>
+    </div>
+  </div>
+
+  <div id="gallery"><div id="grid"></div></div>
+  <!-- Shown in place of the gallery when the catalog is empty. Hidden by
+       default: the common case is a cartridge with games, and a message that
+       flashes before the covers appear would read as an error that wasn't one.
+
+       Three empty plates at the real cover size rather than a line of text in
+       the middle of a void — an empty shelf should look like an empty shelf,
+       which says "nothing has been put here yet" where bare text reads as a
+       page that failed to load. Sized by layout(), from the same numbers the
+       covers would have used. -->
+  <div id="empty">
+    <div id="empty-plates" aria-hidden="true">
+      <span class="plate"></span><span class="plate"></span><span class="plate"></span>
+    </div>
+    <p id="empty-message">No games on this cartridge</p>
+  </div>
+
+  <!-- The selected game's name, on one shared line in the gap under the row —
+       not a label per cover. Thirty names under thirty covers is noise, and
+       the only one worth reading is the one being pointed at. Living in the
+       border gap is also what keeps every cover exactly as tall as its image,
+       so Rust's window sizing needs no adjustment. -->
+  <div id="nameplate"></div>
+
+  <div id="scrollbar"><div id="scrollbar-thumb"></div></div>
+
   <div id="scrim"></div>
-  <!-- The circle's radius, thickness and dash pattern are all set in JS. -->
-  <svg id="ring" viewBox="0 0 100 100" aria-hidden="true">
-    <circle cx="50" cy="50" />
-  </svg>
-  <div id="status"></div>
+  <!-- Progress under the cover that's starting, rather than a ring floating in
+       the middle of the screen. The track is set to the cover's exact width in
+       JS and the segment sweeps inside it: one transform, no layout, no
+       filter — which matters because this webview runs without the GPU. -->
+  <div id="track" aria-hidden="true"><div id="track-run"></div></div>
+  <div id="status" role="status"></div>
 
-  <script>
-    // Look-and-feel settings from config.toml (see Rust's init_script). Fall
-    // back to the same defaults as the CSS above when a value is absent.
-    const ui = window.__UI__ || {};
-
-    // Border of empty space between the window edge and the covers, and the
-    // static gap between covers. Both feed the layout math below and MUST
-    // match Rust's window sizing (border_gap / image_gap) and the CSS `gap`.
-    const PAD = Number.isFinite(ui.borderGap) ? ui.borderGap : 36;
-    const GAP = Number.isFinite(ui.imageGap) ? ui.imageGap : 32;
-
-    // Transition lengths, in step with the CSS above.
-    const MOVE_MS = 350;   // the chosen cover travelling to the centre
-    const OUTRO_MS = 320;  // fade to black once the game is up
-    // Shortest time the loading state stays up before a failure unwinds it.
-    // Some failures come back in a few milliseconds — a missing file needs no
-    // waiting at all — and a ring that flashes and vanishes reads as a glitch
-    // rather than as an attempt that was made and didn't work. Set in Rust
-    // (constants::MIN_LOADING_AFTER_FAIL), not in config.toml; the number here
-    // is only the fallback for a page served without it.
-    const MIN_LOADING_MS = Number.isFinite(ui.minLoadingAfterFail)
-      ? ui.minLoadingAfterFail
-      : 1000;
-
-    // The loading ring, in the SVG's own viewBox units (100 across). The band
-    // is described by its OUTER edge and its thickness, so making it thicker
-    // grows it inwards and the ring's overall size never changes.
-    const RING_OUTER = 42;
-    const RING_STROKE = 14;
-    const RING_RADIUS = RING_OUTER - RING_STROKE / 2; // the stroke straddles this
-    const RING_SEGMENTS = 12; // default; config.toml can override
-
-    // Push the visual knobs into the CSS variables the stylesheet reads.
-    const rootStyle = document.documentElement.style;
-    const setVar = (name, value) => rootStyle.setProperty(name, value);
-    if (ui.backgroundColor) setVar("--background-color", ui.backgroundColor);
-    if (Number.isFinite(ui.imageGap)) setVar("--image-gap", ui.imageGap + "px");
-    if (Number.isFinite(ui.cornerRadius)) setVar("--corner-radius", ui.cornerRadius + "px");
-    if (ui.overlayColor) setVar("--overlay-color", ui.overlayColor);
-    if (ui.loadingRingColor) setVar("--loading-ring-color", ui.loadingRingColor);
-    if (ui.loadingTextColor) setVar("--loading-text-color", ui.loadingTextColor);
-    if (Number.isFinite(ui.loadingTextGap)) setVar("--loading-text-gap", ui.loadingTextGap + "px");
-    // Turns per second in the config, seconds per turn in the CSS. Rust has
-    // already held it to a sensible floor, so this is a plain reciprocal.
-    if (Number.isFinite(ui.loadingRingSpeed) && ui.loadingRingSpeed > 0) {
-      setVar("--ring-spin-duration", (1 / ui.loadingRingSpeed).toFixed(3) + "s");
-    }
-    if (ui.errorBorderColor) setVar("--error-border-color", ui.errorBorderColor);
-    if (Number.isFinite(ui.errorBorderWidth)) setVar("--error-border-width", ui.errorBorderWidth + "px");
-    if (ui.errorTextColor) setVar("--error-text-color", ui.errorTextColor);
-    if (ui.missingSignColor) setVar("--missing-sign-color", ui.missingSignColor);
-    if (Number.isFinite(ui.missingDim)) setVar("--missing-dim", ui.missingDim);
-    // Symmetric shadow bounded by `size`: it's solid for `fade` px out from the
-    // cover edge (the box-shadow spread), then blurs to nothing over the rest,
-    // reaching exactly `size` and no further. blur = size - fade.
-    const shadowSize = Number.isFinite(ui.shadowSize) ? ui.shadowSize : 24;
-    const shadowFade = Number.isFinite(ui.shadowFade) ? ui.shadowFade : 0;
-    const shadowColor = ui.shadowColor || "rgba(0, 0, 0, 0.55)";
-    const spread = Math.max(0, Math.min(shadowFade, shadowSize));
-    const blur = Math.max(0, shadowSize - spread);
-    setVar("--shadow", `0 0 ${blur}px ${spread}px ${shadowColor}`);
-
-    const games = window.__GAMES__ || [];
-    const showCaptions = window.__SHOW_CAPTIONS__ === true;
-    const grid = document.getElementById("grid");
-    const scrim = document.getElementById("scrim");
-    const ring = document.querySelector("#ring circle");
-    // Not named `status`: that would shadow window.status.
-    const statusLine = document.getElementById("status");
-
-    // An empty catalog is a normal state, not a failure — a cartridge nobody
-    // has put a game on yet. Say so, rather than showing an empty window that
-    // looks like the page failed to load. `display` rather than the `hidden`
-    // attribute because #grid's own `inline-flex` would win over it.
-    //
-    // Everything below still runs unchanged: the card loop, layout() and the
-    // preload barrier all iterate an empty list and do nothing.
-    if (games.length === 0) {
-      grid.style.display = "none";
-      document.getElementById("empty").style.display = "block";
-    }
-
-    // "idle" or "launching". One game at a time: while a launch is in flight
-    // every other cover is on its way off screen anyway.
-    let state = "idle";
-    // When the current launch began, for MIN_LOADING_MS.
-    let launchedAt = 0;
-
-    const cards = [];
-    const imgs = games.map((game, index) => {
-      const card = document.createElement("button");
-      card.className = "card";
-      card.type = "button";
-
-      const cover = document.createElement("span");
-      cover.className = "cover";
-
-      const img = document.createElement("img");
-      img.src = game.image;
-      img.alt = game.name;
-      cover.appendChild(img);
-
-      const sign = document.createElement("span");
-      sign.className = "sign";
-      cover.appendChild(sign);
-      card.appendChild(cover);
-
-      if (showCaptions) {
-        const caption = document.createElement("span");
-        caption.className = "caption";
-        caption.textContent = game.name;
-        card.appendChild(caption);
-      }
-
-      const note = document.createElement("span");
-      note.className = "note";
-      card.appendChild(note);
-
-      // A game whose exe isn't on the cartridge can't be chosen at all: Rust
-      // checked at startup, so this is settled before the player touches
-      // anything rather than being discovered by a click that does nothing.
-      if (game.available === false) {
-        card.classList.add("unavailable");
-        card.disabled = true;
-        card.title = game.name + " — missing " + game.exe;
-        note.textContent = "Game files missing";
-      } else {
-        card.title = game.name;
-        card.addEventListener("click", () => beginLaunch(index));
-
-        // Cover art that can't be loaded — wrong path in catalog.json, file
-        // never copied, a format the webview won't decode — otherwise leaves a
-        // bare dark rectangle that reads as placeholder art. Borrow the missing
-        // game's dim-and-sign treatment to say the cover is the thing that's
-        // absent. The card stays clickable: the game itself is on the cartridge
-        // and still runs. Only set for a game that IS available — one whose exe
-        // is missing already carries the more important message.
-        img.addEventListener("error", () => {
-          card.classList.add("unavailable", "no-cover");
-          note.textContent = "Cover missing";
-          // Clearing alt so the webview doesn't lay the alt text out where the
-          // picture would have been — it spills out of the cover's box and over
-          // the card above it. The sign and the note carry the meaning now.
-          img.alt = "";
-        });
-      }
-
-      grid.appendChild(card);
-      cards.push(card);
-      return img;
-    });
-
-    // Fit every cover to the window: each gets an equal share of the width,
-    // and is scaled DOWN to fit that share and the window height (whichever
-    // is tighter) at its native aspect ratio — never scaled up past native.
-    function layout() {
-      const n = Math.max(1, imgs.length);
-      const availW = window.innerWidth - 2 * PAD;
-      const availH = window.innerHeight - 2 * PAD;
-      const shareW = (availW - (n - 1) * GAP) / n;
-
-      imgs.forEach((img, index) => {
-        const nW = img.naturalWidth || 600;
-        const nH = img.naturalHeight || 900;
-        const scale = Math.min(1, shareW / nW, availH / nH);
-        const width = Math.floor(nW * scale);
-        img.style.width = width + "px";
-        img.style.height = Math.floor(nH * scale) + "px";
-        // Keep the "missing" sign's stroke proportional to the cover it's
-        // drawn on, so it reads the same on a small screen as a large one.
-        cards[index].style.setProperty("--sign-stroke", Math.max(3, Math.round(width * 0.018)) + "px");
-      });
-    }
-
-    // ── Launching ──────────────────────────────────────────────────────
-
-    // The transform that takes a card from where it sits in the row to the
-    // middle of the window. The cover keeps the size it already had: it was
-    // sized to fit this window, and resizing it on the way to the centre reads
-    // as a glitch rather than as emphasis. The spinner doesn't compete for the
-    // space either — it sits over the top of the darkened screen.
-    //
-    // Measured from the <img> rather than the card so a caption underneath
-    // doesn't shift the centring, with the transform origin on the image's
-    // centre so the outro's scale-up pushes off the same point.
-    function centreTransform(card, img) {
-      const cardRect = card.getBoundingClientRect();
-      const rect = img.getBoundingClientRect();
-      const dx = window.innerWidth / 2 - (rect.left + rect.width / 2);
-      const dy = window.innerHeight / 2 - (rect.top + rect.height / 2);
-
-      return {
-        origin: `${rect.left + rect.width / 2 - cardRect.left}px ${rect.top + rect.height / 2 - cardRect.top}px`,
-        transform: `translate(${dx}px, ${dy}px)`,
-      };
-    }
-
-    // Freezes every card where it currently sits. Without this, the other
-    // covers leaving the flex row would drag the chosen one sideways mid-flight.
-    function pinCards() {
-      const rects = cards.map((card) => card.getBoundingClientRect());
-      cards.forEach((card, index) => {
-        const rect = rects[index];
-        card.style.left = rect.left + "px";
-        card.style.top = rect.top + "px";
-        card.style.width = rect.width + "px";
-        card.style.height = rect.height + "px";
-        card.classList.add("pinned");
-      });
-    }
-
-    function unpinCards() {
-      cards.forEach((card) => {
-        card.classList.remove("pinned", "dimmed", "chosen");
-        card.style.left = "";
-        card.style.top = "";
-        card.style.width = "";
-        card.style.height = "";
-        card.style.transform = "";
-        card.style.transformOrigin = "";
-      });
-    }
-
-    function beginLaunch(index) {
-      if (state !== "idle") return;
-      const card = cards[index];
-      const img = imgs[index];
-      if (!card || card.disabled) return;
-      state = "launching";
-      launchedAt = Date.now();
-
-      // A retry clears the last failure: the message under the cover belongs
-      // to the attempt that produced it, not to the game.
-      card.classList.remove("failed");
-      card.querySelector(".note").textContent = "";
-
-      pinCards();
-      // Flush the pinned layout before anything animates, so the browser has a
-      // "from" position to interpolate out of rather than jumping.
-      void document.body.offsetWidth;
-
-      const target = centreTransform(card, img);
-      cards.forEach((other, i) => {
-        if (i !== index) other.classList.add("dimmed");
-      });
-      card.classList.add("chosen");
-      card.style.transformOrigin = target.origin;
-      card.style.transform = target.transform;
-
-      statusLine.textContent = "Starting " + games[index].name + "…";
-      document.body.classList.add("launching");
-
-      window.ipc.postMessage("launch:" + index);
-    }
-
-    // Called from Rust once the launch has resolved: `ok` means the game's
-    // window is up (see launch.rs), and the launcher's job is done.
-    window.__launchOutcome = function (index, ok, message) {
-      if (state !== "launching") return;
-      const card = cards[index];
-      if (!card) return;
-
-      if (ok) {
-        document.body.classList.add("finishing");
-        card.style.transform = card.style.transform + " scale(1.06)";
-        // Rust closes on its own deadline as well, so a hiccup here can never
-        // leave the launcher sitting in front of a running game.
-        setTimeout(() => window.ipc.postMessage("close"), OUTRO_MS);
-        return;
-      }
-
-      // Unwind: the covers come back and the failure is reported in the row,
-      // where the player can simply choose it again. Not before the loading
-      // state has been up long enough to have been seen, though.
-      const held = Math.max(0, MIN_LOADING_MS - (Date.now() - launchedAt));
-      setTimeout(() => {
-        document.body.classList.remove("launching");
-        cards.forEach((other) => other.classList.remove("dimmed"));
-        card.style.transform = "";
-        setTimeout(() => {
-          unpinCards();
-          card.classList.add("failed");
-          card.querySelector(".note").textContent = message || "Failed to start";
-          state = "idle";
-        }, MOVE_MS);
-      }, held);
-    };
-
-    // ── Startup ────────────────────────────────────────────────────────
-
-    // Cut the solid ring into segments. Rather than drawing each segment, the
-    // stroke is dashed: `segments` dashes of equal arc, separated by gaps half
-    // the ring's own thickness. Because a dash simply stops, both ends are cut
-    // square across the band — straight sides, no rounded dot.
-    (function cutRing() {
-      // Geometry from the constants above rather than the markup, so the two
-      // can't drift apart.
-      ring.setAttribute("r", RING_RADIUS);
-      ring.setAttribute("stroke-width", RING_STROKE);
-
-      const segments = Math.max(2, Math.round(
-        Number.isFinite(ui.loadingRingSegments) ? ui.loadingRingSegments : RING_SEGMENTS
-      ));
-      const circumference = 2 * Math.PI * RING_RADIUS;
-      const gap = RING_STROKE / 2;
-      // One gap belongs to each segment's share of the circle, so the pattern
-      // closes exactly on itself however many segments there are.
-      const dash = Math.max(0.1, circumference / segments - gap);
-      ring.setAttribute("stroke-dasharray", `${dash} ${gap}`);
-    })();
-
-    const pending = imgs
-      .filter((img) => !img.complete)
-      .map((img) => new Promise((res) => { img.onload = img.onerror = res; }));
-
-    Promise.all(pending).then(layout);
-    layout(); // first pass in case images are already cached
-    window.addEventListener("resize", () => {
-      if (state === "idle") layout();
-    });
-  </script>
+  <script src="app.js"></script>
 </body>
 </html>

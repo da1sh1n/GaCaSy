@@ -121,8 +121,52 @@ mod font {
 }
 
 mod catalog {
-    use crate::catalog::{Entry, game_dir, image_file, slug};
+    use crate::catalog::{Entry, game_dir, image_file, image_path, slug};
     use std::path::Path;
+
+    #[test]
+    fn covers_are_written_under_assets() {
+        // The path this produces goes into catalog.json and is what the
+        // launcher asks its app:// protocol for, so the prefix is a contract
+        // between the two crates rather than a detail of this one.
+        assert_eq!(
+            image_path("bg3", Path::new(r"C:\art\cover.png")),
+            "assets/images/bg3.png"
+        );
+        // The source extension is kept: the webview goes by content, not name,
+        // and renaming a jpg to png only makes the cartridge harder to read.
+        assert_eq!(
+            image_path("celeste", Path::new(r"C:\art\cover.JPG")),
+            "assets/images/celeste.jpg"
+        );
+    }
+
+    #[test]
+    fn a_cover_written_by_an_older_installer_still_resolves() {
+        // Cartridges made before covers moved under assets/ say `images/...`
+        // in their catalog. Nothing migrates them — the launcher serves both
+        // prefixes — so removal has to keep finding the file too, or editing
+        // an old cartridge would leave its art behind.
+        let root = Path::new(r"E:\");
+        let legacy = Entry {
+            name: "bg3".into(),
+            exe: "games/bg3/bg3.exe".into(),
+            image: "images/bg3.png".into(),
+        };
+        assert_eq!(
+            image_file(root, &legacy),
+            Some(root.join("images").join("bg3.png"))
+        );
+
+        let current = Entry {
+            image: "assets/images/bg3.png".into(),
+            ..legacy
+        };
+        assert_eq!(
+            image_file(root, &current),
+            Some(root.join("assets").join("images").join("bg3.png"))
+        );
+    }
 
     #[test]
     fn slugs_are_safe_on_any_filesystem() {

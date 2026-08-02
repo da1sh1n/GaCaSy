@@ -34,10 +34,42 @@ use wry::http::{Request, Response, header::CONTENT_TYPE};
 #[include = "*.js"]
 struct UiAssets;
 
+/// The typeface, baked in the same way and for the same reason.
+///
+/// A second struct because rust-embed takes one folder each, and the font does
+/// not belong in `src/` beside the Rust sources — it lives in
+/// `launcher/assets/fonts/` and is served at the URL `fonts/BackOut.woff2`.
+///
+/// **Embedded rather than shipped on the cartridge, deliberately.** A font in
+/// `output/` is a file that can be deleted, missed by a hand-copy, or left
+/// behind when somebody moves a cartridge's contents — and the launcher would
+/// then silently fall back to a system face. Compiled in, it is exactly as
+/// present as the code that asks for it. It is also the strongest form of "no
+/// network": there is nothing to fetch even in principle.
+#[derive(RustEmbed)]
+#[folder = "assets/"]
+#[include = "fonts/*.woff2"]
+struct FontAssets;
+
 /// Extensions the `app://` protocol will serve as UI assets. Mirrors the
 /// rust-embed include list above so the live-from-`src/` dev path can't hand
 /// out the Rust sources or the seed files. Deliberately kept here rather than
 /// in `constants`: the two lists are one rule, and apart they drift.
+///
+/// The length is spelled out so that adding an extension to one list and
+/// forgetting the other is a compile error rather than a 404.
+///
+/// **The two lists fail differently, and only one of them fails visibly.**
+/// This list gates *both* paths (see `is_ui_asset`, applied above the dev
+/// branch in `handle_request`), so an extension missing here 404s everywhere
+/// and shows up the first time you run it. The rust-embed list above gates
+/// only the deployed binary: under `cargo run` the dev path reads the file
+/// straight off disk and everything works perfectly, and the 404 appears for
+/// the first time on a cartridge. Test a change to either on the built
+/// `output/launcher.exe`, not just in dev.
+///
+/// `woff2` is not here: the font is answered from [`FontAssets`] before this
+/// gate is reached, and there is no `src/` copy for the dev path to serve.
 const UI_ASSET_EXTENSIONS: [&str; 3] = ["html", "css", "js"];
 
 /// Serves the UI from the baked-in `src/` assets, and `images/...` /
@@ -49,8 +81,23 @@ pub fn handle_request(base_dir: &Path, request: Request<Vec<u8>>) -> Response<Co
         path = "index.html";
     }
 
+    // The typeface, baked in. Answered before the disk is consulted and from a
+    // URL prefix nothing on the cartridge uses, so there is never a question of
+    // which source owns a given path.
+    if let Some(file) = FontAssets::get(path) {
+        let bytes = file.data.into_owned();
+        let mime = mime_type_for(Path::new(path), &bytes);
+        return ok_response(mime, Cow::Owned(bytes));
+    }
+
     // Cartridge content lives on disk beside the exe.
-    if path.starts_with("images/") || path.starts_with("games/") {
+    //
+    // `assets/` is where cover art lives now; `images/` is the same thing under
+    // the name it had before, still served so a cartridge written by an older
+    // installer keeps working. Which one a given cartridge uses is not decided
+    // here at all — the path comes out of its own catalog.json, and this only
+    // says which prefixes are allowed to name content rather than UI.
+    if path.starts_with("assets/") || path.starts_with("images/") || path.starts_with("games/") {
         return match fs::read(base_dir.join(path)) {
             Ok(bytes) => {
                 let mime = mime_type_for(Path::new(path), &bytes);
@@ -134,6 +181,7 @@ fn mime_type_for(path: &Path, content: &[u8]) -> &'static str {
         Some("html") => "text/html",
         Some("css") => "text/css",
         Some("js") => "text/javascript",
+        Some("woff2") => "font/woff2",
         Some("json") => "application/json",
         _ => "application/octet-stream",
     }

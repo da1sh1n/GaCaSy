@@ -39,9 +39,12 @@
 //   ui.rs         the window + webview, the IPC, and the event loop
 //   launch.rs     starting a game and deciding whether it came up
 //   log.rs        logs/launcher.log and each game's own output
+//   order.rs      what order the covers are shown in, and repairing a bad one
 //   instance.rs   the single-instance mutex
 //   version.rs    --version / --signature, answered before anything else
-//   index.html    the UI itself, served over app://
+//   index.html    the UI's markup, served over app://
+//   style.css     its look, same
+//   app.js        its behaviour, same
 //
 // This exe carries its own minisign signature, appended past the end of the
 // image (see the sigblock crate). That signature is the cartridge's whole
@@ -52,13 +55,14 @@
 //   launcher.exe --version     print x.y.z and exit
 //   launcher.exe --signature   print this exe's signature and exit
 //
-// Window sizing (see `constants`): the window wraps the covers on both axes —
-// covers aim for a fraction of the screen width and the window is just big
-// enough for them plus margins — but two caps (max width and max height
-// fraction of the screen) shrink the covers to fit when they'd be too big.
-// Rust picks the window size and the CSS in src/index.html fits the covers into
-// it; the shared border/image gap numbers (from config.toml, mirrored as
-// PAD/GAP in the page) keep the two in step.
+// Window sizing (see `constants`): a cover aims for a fraction of the screen
+// width and the window wraps a row of them plus the toolbar and margins. How
+// many games there are sets how *wide* the window is — never how big a cover is
+// — between a floor of three covers and whatever the screen's width cap allows;
+// past that the row scrolls sideways. Rust picks the window size and the page's
+// own layout() in src/app.js fits the covers into it; the shared border/image
+// gap numbers (from config.toml, mirrored as PAD/GAP in the page) keep the two
+// in step.
 //
 // No console window: this is a GUI app, not a CLI tool.
 #![windows_subsystem = "windows"]
@@ -71,6 +75,7 @@ mod content;
 mod instance;
 mod launch;
 mod log;
+mod order;
 mod ui;
 mod version;
 mod window;

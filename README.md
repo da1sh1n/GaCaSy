@@ -45,15 +45,23 @@ GaCaSy/
     src/             App code, the UI, and the seed data files
       main.rs          Entry point; one file per job beside it (ui, launch,
                        config, catalog, assets, window, log, constants, …)
-      index.html       The UI (baked into the exe at build time)
+      index.html       The UI's markup   (baked into the exe at build time)
+      style.css        Its look          (same)
+      app.js           Its behaviour     (same)
       catalog.json     Seed game list — name, exe path, cover image
       config.toml      Seed look & feel
+    assets/
+      fonts/
+        BackOut.woff2  The typeface, also baked into the exe
+    licenses/        Third-party licences the launcher's assets ship under:
+      OFL-BackOut.txt  BackOut, by Frank Adebiaye with Ariel Martín Pérez
+                       (Velvetyne Type Foundry), SIL Open Font License 1.1
     structure.md     Developer reference for the cartridge side
     TODO.md          What's left to build on the cartridge side
     output/          What ships on the cartridge:
       launcher.exe     the app
       games/           your game installs         (you drop these in)
-      images/          cover art, 600x900          (you drop these in)
+      assets/images/   cover art, 600x900          (you drop these in)
       catalog.json     game list  (seeded from src/)
       config.toml      settings   (seeded from src/)
   listener/          The PC-side app (Windows built, Linux not started)
@@ -111,11 +119,11 @@ GaCaSy/
 
 2. **Add your games** — into `output/`:
    - Put each game's install under `output/games/…`.
-   - Put each cover image (600×900, 2:3) under `output/images/…`.
+   - Put each cover image (600×900, 2:3) under `output/assets/images/…`.
    - List them in `output/catalog.json`:
      ```json
      [
-       { "name": "Elden Ring", "exe": "games/elden_ring/elden_ring.exe", "image": "images/elden_ring.png" }
+       { "name": "Elden Ring", "exe": "games/elden_ring/elden_ring.exe", "image": "assets/images/elden_ring.png" }
      ]
      ```
      Paths are relative to `output/`. Your edits here are **never overwritten** by a rebuild.

@@ -1,6 +1,6 @@
 [package]
 name = "launcher"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 
@@ -15,6 +15,12 @@ serde_json = "1.0.151"
 rust-embed = { version = "8.5.0", features = ["include-exclude"] }
 tao = "0.36.0"
 toml = "1.1.4"
+# Reading is `toml` above; writing is this. The launcher keeps three keys in
+# config.toml up to date (order_mode / usage_order / user_order), and that file
+# is mostly hand-written comments — `toml_edit` is what changes one value in
+# place instead of reformatting somebody's file around it. Same generation as
+# `toml 1.1`, so it shares the parser already being built.
+toml_edit = "0.25"
 # `protocol` used to be here: 0.56.0 removed it and made `with_custom_protocol`
 # (see src/ui.rs) always available, so there is no longer a feature to enable.
 wry = "0.56.0"
@@ -24,4 +30,9 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
     "Win32_Security",
     "Win32_System_Threading",
+    # Rounding the window's corners: the Windows 11 way (Dwm) and the Windows 10
+    # fallback (Gdi's regions, applied through user32). See window::round_corners.
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_WindowsAndMessaging",
 ] }
