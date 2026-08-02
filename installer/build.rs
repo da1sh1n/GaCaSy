@@ -47,6 +47,11 @@ struct Item {
     env_override: &'static str,
     /// Human-readable instruction printed when it is missing.
     remedy: &'static str,
+    /// The role its signature has to declare. Checked as well as the signature
+    /// itself, so a build cannot embed a signed *listener* in the slot the
+    /// cartridge's launcher comes out of — both are genuine, and only one of
+    /// them is the right program for the job.
+    role: &'static str,
 }
 
 fn main() {
@@ -66,6 +71,7 @@ fn main() {
                 size_const: "LAUNCHER_BYTES",
                 env_override: "GACASY_LAUNCHER_EXE",
                 remedy: "cargo build --release -p launcher",
+                role: trust::LAUNCHER_ROLE,
             },
             release.join(exe_name("launcher")),
         ),
@@ -75,6 +81,7 @@ fn main() {
                 size_const: "LISTENER_BYTES",
                 env_override: "GACASY_LISTENER_EXE",
                 remedy: "cargo build --release -p listener",
+                role: trust::LISTENER_ROLE,
             },
             release.join(exe_name("listener")),
         ),
@@ -104,7 +111,7 @@ fn main() {
             // UI, already refuses to install anything, and demanding a signed
             // payload from it would defeat the point of having it.
             if !optional
-                && let Err(problem) = check_signature(&source, &manifest)
+                && let Err(problem) = check_signature(&source, &manifest, item.role)
             {
                 missing.push(problem);
             }
@@ -152,6 +159,7 @@ fn main() {
     }
 
     stage_launcher_version(&out_dir, &manifest);
+    stage_trust_anchors(&out_dir, &manifest);
 }
 
 /// Writes `LAUNCHER_VERSION`, read from `../launcher/Cargo.toml`'s `[package].version`
@@ -210,7 +218,7 @@ fn release_dir(out_dir: &Path, manifest: &Path) -> PathBuf {
 /// listener on earth. The user's only symptom would be nothing happening.
 ///
 /// So it fails here, at the one moment both halves are in the same room.
-fn check_signature(binary: &Path, manifest: &Path) -> Result<(), String> {
+fn check_signature(binary: &Path, manifest: &Path, role: &str) -> Result<(), String> {
     let anchors = trust_anchors(manifest);
     if anchors.is_empty() {
         return Err(format!(
@@ -219,49 +227,85 @@ fn check_signature(binary: &Path, manifest: &Path) -> Result<(), String> {
             manifest.join("../keys/gacasy.pub").display()
         ));
     }
+    let anchors: Vec<trust::Anchor> = anchors
+        .iter()
+        .map(|(name, base64)| trust::Anchor {
+            name,
+            base64,
+        })
+        .collect();
 
     let bytes = fs::read(binary).map_err(|e| format!("{} could not be read: {e}", binary.display()))?;
-    let (payload, signature) = sigblock::split(&bytes);
-    let Some(signature) = signature else {
-        return Err(format!(
+
+    // The same call the listener will make against the same bytes. That is the
+    // point of routing this through `trust` rather than open-coding a verify
+    // here: a build-time check that agreed with itself but not with the shipped
+    // listener would bless a payload that is then silently ignored on every PC.
+    match trust::attest(&bytes, &anchors, role) {
+        Ok(_) => Ok(()),
+        Err(trust::Refusal::Unsigned) => Err(format!(
             "{} is not signed — build with `cargo run -p xtask -- release`, which signs \
              the binaries before this crate embeds them",
             binary.display()
-        ));
-    };
-    let signature = minisign_verify::Signature::decode(signature)
-        .map_err(|e| format!("{}'s signature is malformed: {e}", binary.display()))?;
-
-    let verified = anchors.iter().any(|key| {
-        minisign_verify::PublicKey::from_base64(key)
-            .is_ok_and(|key| key.verify(payload, &signature, false).is_ok())
-    });
-    if verified {
-        Ok(())
-    } else {
-        Err(format!(
+        )),
+        Err(trust::Refusal::Untrusted) => Err(format!(
             "{} is signed by a key none of keys/*.pub names, so the listener in this same \
              payload would refuse it. Re-sign it with `cargo run -p xtask -- release`",
             binary.display()
-        ))
+        )),
+        Err(trust::Refusal::WrongRole { expected, found }) => Err(format!(
+            "{} is a signed {found}, but this payload slot needs a {expected}. \
+             The build put the wrong binary in the wrong place",
+            binary.display()
+        )),
+        Err(reason) => Err(format!("{}: {reason}", binary.display())),
     }
 }
 
 /// The public keys in `keys/`, read the same way `listener/build.rs` reads them.
-fn trust_anchors(manifest: &Path) -> Vec<String> {
-    ["gacasy.pub", "dev.pub"]
+fn trust_anchors(manifest: &Path) -> Vec<(String, String)> {
+    [("release", "gacasy.pub"), ("dev", "dev.pub")]
         .iter()
-        .filter_map(|file| {
+        .filter_map(|(name, file)| {
             let path = manifest.join("../keys").join(file);
             println!("cargo::rerun-if-changed={}", path.display());
             let text = fs::read_to_string(path).ok()?;
-            text.lines()
+            let key = text
+                .lines()
                 .map(str::trim)
                 .filter(|line| !line.is_empty() && !line.starts_with("untrusted comment:"))
-                .next_back()
-                .map(str::to_string)
+                .next_back()?;
+            Some((name.to_string(), key.to_string()))
         })
         .collect()
+}
+
+/// Writes the same `ANCHORS` constant `listener/build.rs` writes, for the
+/// installer to verify a cartridge's existing `launcher.exe` at runtime.
+///
+/// The installer needs this for the same reason the listener does and for one
+/// more: it is the program that decides whether a drive is already a cartridge,
+/// and it used to decide that by looking for a *file name* and then running it.
+/// Compiled in rather than read from `keys/` at runtime, because an anchor the
+/// user can edit is an anchor an attacker can edit.
+///
+/// Absent keys are not fatal here the way they are for the listener: a
+/// payload-less UI build (`GACASY_PAYLOAD_OPTIONAL`) has nothing to verify and
+/// already refuses to install anything. An empty list means nothing verifies,
+/// which is the safe direction.
+fn stage_trust_anchors(out_dir: &Path, manifest: &Path) {
+    let mut rust = String::from(
+        "// Generated by build.rs. The public keys this binary trusts, in the\n\
+         // order it tries them. Not configurable at runtime, by design.\n\
+         pub const ANCHORS: &[Anchor] = &[\n",
+    );
+    for (name, key) in trust_anchors(manifest) {
+        rust.push_str(&format!(
+            "    Anchor {{ name: {name:?}, base64: {key:?} }},\n"
+        ));
+    }
+    rust.push_str("];\n");
+    fs::write(out_dir.join("trust_anchors.rs"), rust).expect("write trust_anchors.rs");
 }
 
 fn exe_name(stem: &str) -> String {

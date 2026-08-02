@@ -13,30 +13,26 @@
 //! three programs that answer the same two questions the same way are easier to
 //! trust than two that do and one that doesn't.
 //!
-//! # Probing a cartridge's own launcher
+//! # A cartridge's own launcher
 //!
-//! The installer *does* probe one thing: the `launcher.exe` already sitting on a
-//! cartridge being edited, to notice when it is stale next to the one this
-//! installer carries. [`probe`] mirrors `../../listener/src/version.rs` — same
-//! bare `x.y.z` contract, same bounded wait — but the comparison in
-//! [`crate::app`] checks every field, not just the major: the listener only cares
-//! whether two programs can *talk*, while this is "does this cartridge have the
-//! newest launcher this installer knows how to write."
+//! The installer also wants the version of the `launcher.exe` already sitting on
+//! a cartridge being edited, to notice when it is stale next to the one this
+//! installer carries. That comes out of the file's *signature* — see
+//! [`crate::volume::attested_launcher`] — and the comparison in [`crate::app`]
+//! checks every field, not just the major: the listener only cares whether two
+//! programs can *talk*, while this is "does this cartridge have the newest
+//! launcher this installer knows how to write."
+//!
+//! It used to come from running that launcher with `--version` and reading what
+//! it printed. That was a security bug, not a style problem: the file being
+//! asked is whatever a stranger left at the root of a USB stick, and asking it
+//! meant executing it. The listener has never done this and documents at length
+//! why — `../../listener/src/trust.rs`. The answer was in the signature the
+//! whole time.
 
 use std::env;
-use std::path::Path;
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
 
 use crate::payload;
-
-/// How long a cartridge's launcher gets to answer `--version`. Same bound as the
-/// listener's probe, for the same reason: this runs on the UI thread's behalf and
-/// must not be able to wedge it behind an exe that never exits.
-const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
-
-/// How often to check whether it has exited.
-const POLL: Duration = Duration::from_millis(25);
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct Version {
@@ -70,47 +66,6 @@ pub fn parse(text: &str) -> Option<Version> {
         patch: next()?,
     };
     parts.next().is_none().then_some(version)
-}
-
-/// Asks a cartridge's `launcher.exe` for its version.
-///
-/// `None` means it could not be established — refused to start, took too long, or
-/// said something unparseable. Treated by the caller as "nothing to report" rather
-/// than "definitely stale": a launcher too old to have `--version` at all is a
-/// real possibility this installer has no business guessing at.
-pub fn probe(exe: &Path) -> Option<Version> {
-    let child = Command::new(exe)
-        .arg("--version")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-
-    answer(child, PROBE_TIMEOUT)
-}
-
-/// Waits for a probe to finish and reads its first line, killing it on timeout.
-fn answer(mut child: std::process::Child, timeout: Duration) -> Option<Version> {
-    let deadline = Instant::now() + timeout;
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(POLL),
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
-        }
-    }
-
-    let mut output = String::new();
-    if let Some(mut stdout) = child.stdout.take() {
-        use std::io::Read;
-        stdout.read_to_string(&mut output).ok()?;
-    }
-    parse(output.lines().next()?)
 }
 
 /// Handles `--version` / `--signature` / `--help` if asked. `true` means the

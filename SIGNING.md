@@ -34,26 +34,51 @@ unforgeable.
 
 The definition of a cartridge is exactly one sentence:
 
-> A volume with a `launcher.exe` at its root carrying a valid signature from a
-> key the listener was built to trust.
+> A volume with a `launcher.exe` at its root carrying a valid signature, from a
+> key the listener was built to trust, declaring itself a launcher.
 
 No marker file, no key stored on the cartridge, nothing on the PC to edit. An
 earlier design had all three, and its own docs admitted it was a recognition
 handshake rather than a security boundary — anyone who could read a cartridge
 could clone its secret.
 
-Two properties fall out of this and are worth stating because they constrain
+Four properties fall out of this and are worth stating because they constrain
 everything else:
 
 - **The listener reads the file; it never asks the program.** A binary that
   reports its own trustworthiness proves nothing, and to ask you would first
   have to run the thing you are deciding whether to run. See
-  [listener/src/trust.rs](listener/src/trust.rs).
+  [listener/src/trust.rs](listener/src/trust.rs). Nothing downstream of the
+  check asks either — a launcher's *version* comes out of the signature too
+  (the signed comment, below), never from running it.
 - **The trust anchor is compiled in, not configured.** If the list of accepted
   keys were a line in a `config.toml` next to the exe, anything that could write
   that file could append its own key and get arbitrary code auto-run. Changing
   what a listener trusts means replacing the listener. See
   [listener/build.rs](listener/build.rs).
+- **The signature declares a role, and the check requires it.** `launcher.exe`,
+  `listener.exe` and `installer.exe` are signed with the same key, so "signed by
+  us" is not the same question as "is a launcher" — a genuine `installer.exe`
+  renamed to `launcher.exe` is still genuinely signed. minisign authenticates a
+  *trusted comment* alongside the payload (a second signature over
+  `signature ‖ comment`), so the role written into it — `gacasy-launcher`,
+  `gacasy-listener`, `gacasy-installer` — is as unforgeable as the file itself.
+  [trust/src/lib.rs](trust/src/lib.rs) is the one place that checks both, for
+  every program that needs to.
+- **What this does not cover.** The signature is over `launcher.exe`'s own
+  bytes, and only those. `catalog.json`, `config.toml`, `images/` and `games/`
+  sit beside it on the same disk, are written by whoever made the cartridge —
+  typically the installer, on a machine holding no signing key — and carry no
+  signature of their own; nothing could sign them, so nothing does. A launcher
+  therefore treats that content as untrusted input regardless of how it was
+  started: `catalog.json`'s `exe` and `image` fields are checked to stay inside
+  the cartridge before anything is done with them
+  ([launcher/src/catalog.rs](launcher/src/catalog.rs)), the same way the
+  installer already checked them when removing a game
+  ([installer/src/catalog.rs](installer/src/catalog.rs)). The residual case this
+  leaves open: someone who copies a genuine, publicly-available signed launcher
+  onto a drive alongside their own catalog and games gets it auto-started —
+  the signature proves the launcher is genuine, not that the drive is.
 
 ---
 

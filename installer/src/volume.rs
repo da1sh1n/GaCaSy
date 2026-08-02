@@ -55,6 +55,38 @@
 
 use std::path::{Path, PathBuf};
 
+use trust::Anchor;
+
+// `ANCHORS: &[Anchor]`, written by build.rs from keys/*.pub — the same constant,
+// generated the same way, as the listener's. Compiled in rather than read from
+// disk: an anchor in a writable file beside the exe would let anything that
+// could edit it decide what this program trusts.
+include!(concat!(env!("OUT_DIR"), "/trust_anchors.rs"));
+
+/// The version of `<root>/launcher.exe`, if it is a launcher we signed.
+///
+/// `None` for a drive with no launcher, an unsigned one, one signed by a key
+/// this build does not carry, or a genuine GaCaSy binary that is not a launcher.
+/// All four mean the same thing here — this is not a cartridge this installer
+/// made — and none of them are worth telling apart on a screen whose next
+/// question is "create or edit?".
+///
+/// **Nothing is executed.** The version comes out of the signed comment. The
+/// installer used to spawn this file with `--version` and read what it printed,
+/// which meant running an arbitrary binary off a stranger's USB stick to decide
+/// what it was: the exact thing `listener/src/trust.rs` explains it must never
+/// do, done by the program next door.
+pub fn attested_launcher(root: &Path) -> Option<String> {
+    let path = root.join(crate::cartridge::LAUNCHER_NAME);
+    if !path.is_file() {
+        return None;
+    }
+    let bytes = std::fs::read(&path).ok()?;
+    trust::attest(&bytes, ANCHORS, trust::LAUNCHER_ROLE)
+        .ok()
+        .map(|attested| attested.version)
+}
+
 /// Whether a drive may be written to, and if not, why not.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Eligibility {
@@ -99,15 +131,25 @@ pub struct Volume {
     pub eligibility: Eligibility,
     pub free_bytes: u64,
     pub total_bytes: u64,
-    /// Already carries a launcher — routes to edit mode instead of create.
+    /// Already carries a launcher **we verified** — routes to edit mode instead
+    /// of create.
     ///
-    /// Presence only; the signature is not checked here. This picks which
-    /// *screen* to show, and getting it wrong costs a wrong starting catalog,
-    /// not a wrong trust decision — that one belongs to the listener, which
-    /// verifies properly. Treating an unsigned launcher as "not a cartridge"
-    /// would route someone's own broken cartridge into create mode and quietly
-    /// drop the games already on it.
+    /// This used to be presence of the file alone, on the reasoning that picking
+    /// the wrong screen costs a wrong starting catalog rather than a wrong trust
+    /// decision. That was wrong twice over. It is a trust decision, because the
+    /// edit path goes on to read — and previously to *execute* — what it found;
+    /// and it is one the user sees, because the picker vouches for the drive in
+    /// so many words.
+    ///
+    /// So the signature is checked, by the same call the listener makes. An
+    /// unsigned or foreign `launcher.exe` means create mode, which is the honest
+    /// answer: nothing here made that file and nothing here can edit it.
     pub is_cartridge: bool,
+
+    /// The launcher version its signature states, when it is one of ours. Read
+    /// from the signed comment, never by running the file — see
+    /// `../version.rs`.
+    pub launcher_version: Option<String>,
 }
 
 impl Volume {
@@ -353,6 +395,7 @@ mod platform {
         };
 
         let (label, fs) = volume_info(&wide_root);
+        let launcher_version = super::attested_launcher(&root);
         Some(Volume {
             label,
             fs,
@@ -360,7 +403,8 @@ mod platform {
             eligibility,
             free_bytes,
             total_bytes,
-            is_cartridge: root.join(crate::cartridge::LAUNCHER_NAME).is_file(),
+            is_cartridge: launcher_version.is_some(),
+            launcher_version,
             root,
         })
     }

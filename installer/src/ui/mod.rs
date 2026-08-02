@@ -46,7 +46,6 @@ impl App {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         self.poll_job();
-        self.poll_launcher_probe();
         for draft in &mut self.drafts {
             draft.poll();
         }
@@ -60,7 +59,7 @@ impl App {
                     ui.add_space(8.0);
                     match self.screen {
                         Screen::Home => home(self, ui),
-                        Screen::Volume => volume_screen(self, &ctx, ui),
+                        Screen::Volume => volume_screen(self, ui),
                         Screen::Games => games::screen(self, &ctx, ui),
                         Screen::Review => review(self, ui),
                         Screen::Working => working(self, ui),
@@ -274,7 +273,7 @@ fn home(app: &mut App, ui: &mut egui::Ui) {
 /// silently shortens a list reads as a bug. The line below does that job
 /// instead: it says once why a drive might be missing, rather than filling the
 /// screen with `C:` and every internal disk as rows that exist to say no.
-fn volume_screen(app: &mut App, ctx: &egui::Context, ui: &mut egui::Ui) {
+fn volume_screen(app: &mut App, ui: &mut egui::Ui) {
     if app.volumes.is_empty() {
         ui.colored_label(
             WARN,
@@ -309,7 +308,7 @@ fn volume_screen(app: &mut App, ctx: &egui::Context, ui: &mut egui::Ui) {
         ui.add_space(4.0);
     }
     if let Some(index) = chosen {
-        app.choose_volume(ctx, index);
+        app.choose_volume(index);
     }
 }
 

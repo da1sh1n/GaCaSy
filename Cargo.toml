@@ -5,6 +5,7 @@
 #   listener/   runs on the PC and notices a cartridge being connected
 #   installer/  the one file a user downloads; writes both of the above
 #   sigblock/   the signature every one of them carries inside itself
+#   trust/      whether a signature makes a binary safe to run, in one place
 #   xtask/      builds and signs a release; never shipped
 #
 # The installer's build depends on the other two: it embeds their `--release`
@@ -13,7 +14,7 @@
 # installer/build.rs.
 [workspace]
 resolver = "3"
-members = ["installer", "launcher", "listener", "sigblock", "xtask"]
+members = ["installer", "launcher", "listener", "sigblock", "trust", "xtask"]
 
 # The version every program reports from `--version`, and the contract between
 # them: two GaCaSy programs are compatible when this number matches. `y` and `z`
@@ -43,8 +44,8 @@ project_version = 0
 # xtask is out for a different reason: it is a build tool, not a product, and
 # nothing it depends on should ever end up linked into something we ship. It
 # still runs from anywhere in the workspace as `cargo run -p xtask -- …`.
-# sigblock is in, because both shipped programs link it.
-default-members = ["launcher", "listener", "sigblock"]
+# sigblock and trust are in, because both shipped programs link them.
+default-members = ["launcher", "listener", "sigblock", "trust"]
 
 # What ships. Cargo's stock `release` profile optimizes each crate on its own
 # and then links the pieces, which for a GUI binary leaves a lot of code nothing

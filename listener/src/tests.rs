@@ -10,25 +10,27 @@
 //! can watch work — the log, the settings paths, the drive-letter bookkeeping
 //! in the Windows trigger — are not tested here. What survives is the decision
 //! chain that runs against whatever a stranger just plugged in: is this
-//! launcher signed by a key we trust ([`trust`]), do we therefore start it
-//! ([`volume`]), and does it answer with a version we can talk to
-//! ([`version`]).
+//! launcher signed by a key we trust, for the job we are about to give it
+//! ([`trust`]), do we therefore start it ([`volume`]), and can we read the
+//! version its signature states ([`version`]).
 //!
 //! Kept inside the crate rather than in `tests/` because the listener is a
-//! binary with no library target, and because [`crate::version::answer`] is
-//! private for good reason. It also keeps `Log::silent` behind `#[cfg(test)]`,
-//! so no production path can construct a log that discards everything.
+//! binary with no library target. It also keeps `Log::silent` behind
+//! `#[cfg(test)]`, so no production path can construct a log that discards
+//! everything.
 //!
 //! Run with `cargo test -p listener`.
 //!
-//! # Two things to know before running these
+//! # Before running these
 //!
-//! - [`trust`] asserts against the anchors `build.rs` generated from `keys/*.pub`.
-//!   A fresh clone has no `keys/`, so run `cargo run -p xtask -- keygen` first —
-//!   without it the crate does not compile at all, let alone test.
-//! - [`version`] spawns real processes (`ping -t` on Windows, `sleep` elsewhere)
-//!   to test the give-up path, and kills them. That is the point of the test:
-//!   an unbounded wait here would freeze the Windows message pump.
+//! [`trust`] asserts against the anchors `build.rs` generated from `keys/*.pub`.
+//! A fresh clone has no `keys/`, so run `cargo run -p xtask -- keygen` first —
+//! without it the crate does not compile at all, let alone test.
+//!
+//! The cross-crate signature cases — a genuine launcher accepted, a genuine
+//! *installer* refused, a comment edited after signing — live in `trust`'s own
+//! suite, where a keypair can be generated and used to sign. What is tested here
+//! is the part that is about a volume rather than about a signature.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -73,6 +75,14 @@ mod trust {
     use crate::trust::{ANCHORS, LAUNCHER_NAME, Refusal, verify_launcher};
     use std::fs;
 
+    /// Shorthand for "refused for this signature reason".
+    fn refused_because(dir: &Scratch, expected: ::trust::Refusal) -> bool {
+        matches!(
+            verify_launcher(dir.path()),
+            Err(Refusal::Signature(actual)) if actual == expected
+        )
+    }
+
     /// A volume with nothing on it is the ordinary case, and the one that has to
     /// stay cheap: this is every USB stick anyone ever plugs in.
     #[test]
@@ -88,10 +98,37 @@ mod trust {
     fn an_unsigned_launcher_is_refused() {
         let dir = Scratch::new("trust-unsigned");
         fs::write(dir.join(LAUNCHER_NAME), b"MZ but nobody signed it").expect("write");
-        assert!(matches!(
-            verify_launcher(dir.path()),
-            Err(Refusal::Unsigned)
-        ));
+        assert!(refused_because(&dir, ::trust::Refusal::Unsigned));
+    }
+
+    /// The handle `verify_launcher` holds has to deny writers without denying
+    /// readers — the image loader needs one to start the process, so a lock that
+    /// excluded everything would make every genuine cartridge fail to launch.
+    /// Verified on a file we control, since the signed path cannot be reached
+    /// here without a signing key.
+    #[cfg(windows)]
+    #[test]
+    fn the_lock_denies_writers_and_allows_readers() {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_SHARE_READ: u32 = 0x0000_0001;
+
+        let dir = Scratch::new("trust-lock");
+        let path = dir.join("locked.bin");
+        fs::write(&path, b"MZ").expect("write");
+
+        let _held = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ)
+            .open(&path)
+            .expect("open with the same share mode verify_launcher uses");
+
+        assert!(fs::read(&path).is_ok(), "a reader must still get in");
+        assert!(
+            fs::OpenOptions::new().write(true).open(&path).is_err(),
+            "a writer must not: this is what stops the file being swapped \
+             between verifying it and running it"
+        );
+        assert!(fs::remove_file(&path).is_err(), "nor a deleter");
     }
 
     #[test]
@@ -122,7 +159,7 @@ mod trust {
         assert!(!ANCHORS.is_empty(), "build.rs produced no trust anchors");
         for anchor in ANCHORS {
             assert!(
-                minisign_verify::PublicKey::from_base64(anchor.base64).is_ok(),
+                anchor.is_usable(),
                 "keys/{}.pub is not a usable minisign public key",
                 anchor.name
             );
@@ -131,10 +168,7 @@ mod trust {
 }
 
 mod version {
-    use crate::version::{PROBE_TIMEOUT, Version, answer, own, parse, probe};
-    use std::path::Path;
-    use std::process::{Command, Stdio};
-    use std::time::{Duration, Instant};
+    use crate::version::{Version, own, parse};
 
     #[test]
     fn parses_a_bare_version() {
@@ -152,7 +186,9 @@ mod version {
     #[test]
     fn refuses_anything_that_is_not_three_numbers() {
         // The shapes a well-meaning change might introduce. Each would be a
-        // guess about what the launcher meant, so each is refused.
+        // guess about what the signature meant, so each is refused. The first is
+        // the one that matters now: `parse` is fed the *version field* of a
+        // trusted comment, never the whole comment.
         assert_eq!(parse("gacasy-launcher 0.2.0"), None);
         assert_eq!(parse("0.2"), None);
         assert_eq!(parse("0.2.0.1"), None);
@@ -164,70 +200,24 @@ mod version {
 
     #[test]
     fn our_own_version_parses() {
-        // If this fails, `--version` is printing something the listener on the
-        // other side of a probe could not read.
+        // If this fails, `--version` is printing something no other GaCaSy
+        // program could read back.
         let own = own();
         assert_eq!(parse(&own.to_string()), Some(own));
     }
 
-    /// Spawns something that will not answer for a long time.
-    fn a_process_that_never_answers() -> std::process::Child {
-        let mut command = if cfg!(windows) {
-            // -t pings until killed, and unlike most commands it ignores stdin
-            // entirely, so closing stdin cannot end it early.
-            let mut c = Command::new("ping");
-            c.args(["-t", "127.0.0.1"]);
-            c
-        } else {
-            let mut c = Command::new("sleep");
-            c.arg("30");
-            c
+    #[test]
+    fn the_version_field_of_a_signed_comment_parses() {
+        // The shape `xtask sign` writes, split by `trust::attest` into role and
+        // version. This is the contract between the two crates: if xtask's
+        // comment format ever changes, this is what should notice.
+        let (role, version) = {
+            let comment = "gacasy-launcher 0.2.1 2026-07-30";
+            let mut parts = comment.split_whitespace();
+            (parts.next().unwrap(), parts.next().unwrap())
         };
-        command
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("spawn a blocking process")
-    }
-
-    #[test]
-    fn a_launcher_that_never_answers_is_given_up_on_and_killed() {
-        // The failure this prevents: the Windows listener asks from the thread
-        // blocked in GetMessage, so an unbounded wait here would freeze every
-        // later device arrival behind one wedged binary.
-        let started = Instant::now();
-        assert_eq!(
-            answer(a_process_that_never_answers(), Duration::from_millis(150)),
-            None
-        );
-        assert!(
-            started.elapsed() < Duration::from_secs(5),
-            "gave up after {:?}, which is not giving up",
-            started.elapsed()
-        );
-    }
-
-    #[test]
-    fn a_binary_that_answers_with_junk_is_not_a_version() {
-        // Exits promptly, prints something that is not an x.y.z.
-        let child = Command::new(if cfg!(windows) { "cmd" } else { "echo" })
-            .args(if cfg!(windows) {
-                vec!["/C", "echo hello"]
-            } else {
-                vec!["hello"]
-            })
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("spawn");
-        assert_eq!(answer(child, PROBE_TIMEOUT), None);
-    }
-
-    #[test]
-    fn a_binary_that_does_not_exist_is_not_a_version() {
-        assert_eq!(probe(Path::new("./no-such-launcher-anywhere")), None);
+        assert_eq!(role, ::trust::LAUNCHER_ROLE);
+        assert_eq!(parse(version).map(|v| v.minor), Some(2));
     }
 }
 

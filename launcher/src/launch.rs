@@ -23,7 +23,7 @@ use std::process::{Child, Command};
 use std::thread;
 use std::time::Instant;
 
-use crate::catalog::Game;
+use crate::catalog::{self, Game};
 use crate::constants::*;
 use crate::log;
 
@@ -55,6 +55,15 @@ pub fn spawn(
     index: usize,
     show_console_window: bool,
 ) -> Result<Child, String> {
+    // Re-checked rather than trusted from the catalog load: `game` reaches here
+    // by index over IPC (see `crate::ui`), and re-deriving the containment
+    // check at the one place that actually spawns something is cheaper than a
+    // second path from an untrusted `catalog.json` entry to a running process.
+    if !catalog::is_contained(&game.exe) {
+        log::line(base, &format!("REFUSED {}: exe path escapes the cartridge", game.name));
+        return Err("Failed to start — game files missing".to_string());
+    }
+
     let exe = base.join(&game.exe);
     log::line(base, &format!("launching {} ({})", game.name, exe.display()));
 

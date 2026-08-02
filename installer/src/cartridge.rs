@@ -28,7 +28,15 @@
 //! The installer neither writes nor knows any secret: it copies a binary that
 //! was already signed at build time, and copying it is the entire act of
 //! creating a cartridge's identity. Nothing on the disk can be edited to grant
-//! trust, because nothing on the disk grants trust.
+//! that *file* trust it doesn't have.
+//!
+//! That is narrower than "trust", though, and worth being precise about:
+//! `catalog.json`, `config.toml`, `images/` and `games/` are everything else
+//! this function writes, and none of it is signed — there is no secret this
+//! installer could sign it with. What stops that from mattering is the
+//! launcher itself refusing to run anything those files name outside the
+//! cartridge (`../../launcher/src/catalog.rs`), not the signature. See
+//! `../../SIGNING.md`, §1.
 //!
 //! `EBWebView/` and `logs/` are not created — the launcher makes those on first
 //! run.

@@ -15,13 +15,16 @@
 //! The order below is the security property, not a style choice:
 //!
 //! ```text
-//! read the bytes -> verify the signature -> run it -> ask what it is
+//! read the bytes -> verify the signature -> ask the signature what it is -> run it
 //! ```
 //!
-//! Nothing is executed until [`crate::trust`] has said yes, and the version
-//! question is asked only of a binary that already passed. Reversing the last
-//! two steps would mean running an unverified program to decide whether to run
-//! it.
+//! Nothing is executed at any point before the last step. The version used to
+//! come from running the launcher with `--version` and believing it, which was
+//! defensible only because it happened after verification — but it meant the
+//! file was opened, executed and read three separate times to answer two
+//! questions. minisign signs a comment alongside the payload, `xtask` writes the
+//! version into it, and [`crate::trust`] hands it back already authenticated, so
+//! the probe bought nothing that the signature was not already carrying.
 
 use std::path::Path;
 use std::process::Command;
@@ -63,10 +66,9 @@ pub fn handle_volume(root: &Path, log: &Log) -> Outcome {
         }
     };
 
-    // Only now — the binary is one we signed, so asking it about itself is
-    // reasonable. See version.rs.
+    // Straight out of the verified signature — see version.rs.
     let ours = version::own();
-    match version::probe(&launcher.path) {
+    match version::parse(&launcher.version) {
         Some(theirs) if theirs.major != ours.major => {
             log.line(&format!(
                 "{} ignored: launcher is project version {} and this listener is {} \
@@ -99,13 +101,14 @@ pub fn handle_volume(root: &Path, log: &Log) -> Outcome {
         }
         None => {
             // Deliberately not fatal. The signature already proved this is our
-            // binary; refusing to start a genuine launcher because it fumbled a
-            // side question would turn a cosmetic fault into a dead cartridge.
+            // binary; refusing to start a genuine launcher over a comment we
+            // cannot parse would turn a cosmetic fault into a dead cartridge.
             // A definite mismatch above is a different matter — that is the
-            // launcher clearly stating something we cannot work with.
+            // signature clearly stating something we cannot work with.
             log.line(&format!(
-                "{} launcher did not report a usable version; starting it anyway",
-                root.display()
+                "{} launcher's signature carries no usable version ({:?}); starting it anyway",
+                root.display(),
+                launcher.version
             ));
         }
     }

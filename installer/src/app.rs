@@ -30,7 +30,7 @@ use crate::listener;
 use crate::payload;
 use crate::version::{self, Version};
 use crate::volume::{self, Volume};
-use crate::work::{Job, LauncherProbe, Scanning};
+use crate::work::{Job, Scanning};
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub enum Screen {
@@ -169,11 +169,14 @@ pub struct App {
     pub existing: Vec<Entry>,
     pub remove: Vec<bool>,
 
-    /// Edit mode: asking the cartridge's own launcher.exe what version it is.
-    launcher_probe: Option<LauncherProbe>,
-    /// Set once the probe answers with something other than `version::bundled()`.
-    /// `None` covers "not a cartridge", "still probing", "matches", and "the probe
-    /// couldn't tell" alike — none of those are a reason to offer an update.
+    /// Edit mode: set when the cartridge's launcher states a version other than
+    /// `version::bundled()`. `None` covers "not a cartridge", "matches", and "its
+    /// signature carries no version we can read" alike — none of those are a
+    /// reason to offer an update.
+    ///
+    /// Read straight off the verified signature when the volume was picked, so
+    /// there is no pending state and nothing to poll. It used to be the answer
+    /// to running the file.
     pub stale_launcher: Option<Version>,
 
     pub drafts: Vec<Draft>,
@@ -202,7 +205,6 @@ impl App {
             name: String::new(),
             existing: Vec::new(),
             remove: Vec::new(),
-            launcher_probe: None,
             stale_launcher: None,
             drafts: Vec::new(),
             job: None,
@@ -232,11 +234,13 @@ impl App {
     }
 
     /// The routing decision, and the only place it is made.
-    pub fn choose_volume(&mut self, ctx: &egui::Context, index: usize) {
+    /// No `ctx`: this used to start a background probe and needed something to
+    /// wake the UI when it answered. Everything it decides is now known the
+    /// moment the drive was listed.
+    pub fn choose_volume(&mut self, index: usize) {
         self.target = Some(index);
         self.drafts.clear();
         self.error = None;
-        self.launcher_probe = None;
         self.stale_launcher = None;
 
         let Some(volume) = self.volumes.get(index) else {
@@ -268,8 +272,20 @@ impl App {
                 Ok(entries) => {
                     self.remove = vec![false; entries.len()];
                     self.existing = entries;
-                    self.launcher_probe =
-                        Some(LauncherProbe::start(ctx, root.join(cartridge::LAUNCHER_NAME)));
+                    // Its signature already told us this when the drive was
+                    // listed, so there is nothing to start and nothing to wait
+                    // for. Any position differing counts — not just the major,
+                    // which is all the listener cares about at runtime. This is
+                    // "does the cartridge have the newest launcher this
+                    // installer knows how to write", not "will these two
+                    // programs still talk to each other".
+                    self.stale_launcher = match (
+                        volume.launcher_version.as_deref().and_then(version::parse),
+                        version::bundled(),
+                    ) {
+                        (Some(theirs), Some(ours)) if theirs != ours => Some(theirs),
+                        _ => None,
+                    };
                 }
                 Err(e) => {
                     // Refusing here is the point: writing a new catalog over one
@@ -460,24 +476,6 @@ impl App {
             .uncancellable(),
         );
         self.screen = Screen::Working;
-    }
-
-    /// Picks up the launcher-version probe started in [`Self::choose_volume`].
-    ///
-    /// Any position differing is what this checks — not just the major, which is
-    /// all the listener cares about at runtime. This is "does the cartridge have
-    /// the newest launcher this installer knows how to write", not "will these
-    /// two programs still talk to each other".
-    pub fn poll_launcher_probe(&mut self) {
-        let Some(probe) = &self.launcher_probe else {
-            return;
-        };
-        let Some(theirs) = probe.take() else { return };
-        self.launcher_probe = None;
-        self.stale_launcher = match (theirs, version::bundled()) {
-            (Some(theirs), Some(ours)) if theirs != ours => Some(theirs),
-            _ => None,
-        };
     }
 
     /// Rewrites just `launcher.exe` on the current cartridge, independent of the

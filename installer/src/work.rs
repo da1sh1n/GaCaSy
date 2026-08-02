@@ -23,7 +23,6 @@ use std::thread;
 
 use crate::cartridge::Progress;
 use crate::detect;
-use crate::version::{self, Version};
 
 enum Update {
     Progress(Progress),
@@ -162,26 +161,9 @@ impl Drop for Scanning {
     }
 }
 
-/// Asks a cartridge's own `launcher.exe` for its version, in the background —
-/// same shape as [`Scanning`]. It has no cancel flag: [`version::probe`] already
-/// bounds itself with a timeout, so there is nothing a cancel would shorten.
-pub struct LauncherProbe {
-    result: Receiver<Option<Version>>,
-}
-
-impl LauncherProbe {
-    pub fn start(ctx: &egui::Context, exe: PathBuf) -> LauncherProbe {
-        let (sender, result) = mpsc::channel();
-        let ctx = ctx.clone();
-        thread::spawn(move || {
-            let _ = sender.send(version::probe(&exe));
-            ctx.request_repaint();
-        });
-        LauncherProbe { result }
-    }
-
-    /// The probe's answer, once there is one.
-    pub fn take(&self) -> Option<Option<Version>> {
-        self.result.try_recv().ok()
-    }
-}
+// `LauncherProbe` was here: a background thread that ran a cartridge's own
+// `launcher.exe --version` and reported what it printed. It is gone, and not
+// because it was slow. The version it went looking for is inside the signature
+// the file already carries, so the thread existed to execute an arbitrary binary
+// off a stranger's USB stick in order to learn something the installer could
+// simply read. See `../src/volume.rs::attested_launcher`.

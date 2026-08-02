@@ -8,16 +8,17 @@ license = "GPL-3.0-or-later"
 # Where the signature lives inside launcher.exe. Zero dependencies of its own.
 sigblock = { path = "../sigblock" }
 
-# Verifying that signature — the whole trust model, in one zero-dependency
-# crate. Verify-only on purpose: this program has no business being able to
-# sign anything, and the signing half (scrypt, key handling) is weight it would
-# carry for nothing. That lives in xtask, which is never shipped.
-minisign-verify = "0.2.5"
+# Whether that signature makes a binary safe to run. Shared with the installer,
+# which needs the same answer and used to reach a different one. It pulls in
+# minisign-verify (verify-only on purpose: nothing that ships has any business
+# being able to sign, and the signing half — scrypt, key handling — is weight it
+# would carry for nothing; that lives in xtask, which is never shipped).
+trust = { path = "../trust" }
 
 # `toml` used to be here for the retired `.cartridge` marker and this crate's
 # own config.toml. Both are gone — trust is compiled in (see build.rs) and
 # nothing is read from disk but the launcher itself — so on a non-Windows build
-# the two crates above are the entire dependency tree.
+# the crates above are the entire dependency tree.
 
 # Windows-only: the resident trigger is entirely Win32. Nothing here is pulled
 # in on a Linux build.

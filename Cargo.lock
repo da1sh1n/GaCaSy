@@ -1591,12 +1591,12 @@ dependencies = [
  "flate2",
  "glutin",
  "glutin-winit",
- "minisign-verify",
  "rfd",
  "serde",
  "serde_json",
  "sigblock",
  "toml 1.1.4+spec-1.1.0",
+ "trust",
  "windows-sys 0.61.2",
 ]
 
@@ -1753,7 +1753,7 @@ dependencies = [
 
 [[package]]
 name = "launcher"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "rust-embed",
  "serde",
@@ -1761,6 +1761,7 @@ dependencies = [
  "sigblock",
  "tao",
  "toml 1.1.4+spec-1.1.0",
+ "toml_edit 0.25.13+spec-1.1.0",
  "windows-sys 0.61.2",
  "wry",
 ]
@@ -1824,8 +1825,8 @@ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 name = "listener"
 version = "0.3.0"
 dependencies = [
- "minisign-verify",
  "sigblock",
+ "trust",
  "windows-sys 0.61.2",
  "winres",
 ]
@@ -3519,6 +3520,7 @@ dependencies = [
  "indexmap",
  "toml_datetime 1.1.1+spec-1.1.0",
  "toml_parser",
+ "toml_writer",
  "winnow 1.0.4",
 ]
 
@@ -3552,6 +3554,15 @@ name = "tracing-core"
 version = "0.1.36"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db97caf9d906fbde555dd62fa95ddba9eecfd14cb388e4f491a66d74cd5fb79a"
+
+[[package]]
+name = "trust"
+version = "0.1.0"
+dependencies = [
+ "minisign",
+ "minisign-verify",
+ "sigblock",
+]
 
 [[package]]
 name = "typenum"

@@ -271,6 +271,60 @@ mod version {
 }
 
 mod volume {
+    /// The build carries at least one usable anchor. Same assertion as the
+    /// listener's `this_build_has_something_to_trust` — the two must agree, or a
+    /// cartridge one of them would accept the other silently would not.
+    #[test]
+    fn this_build_has_something_to_trust() {
+        use crate::volume::ANCHORS;
+
+        assert!(!ANCHORS.is_empty(), "build.rs produced no trust anchors");
+        for anchor in ANCHORS {
+            assert!(
+                anchor.is_usable(),
+                "keys/{}.pub is not a usable minisign public key",
+                anchor.name
+            );
+        }
+    }
+
+    /// The finding this change exists to fix: a `launcher.exe` at a drive root is
+    /// not believed just because it has the right name. Without a signing key
+    /// this cannot construct something that *does* verify — that round trip is
+    /// `trust`'s own suite — but every one of these must come back `None`
+    /// rather than "close enough".
+    #[test]
+    fn only_a_verified_signature_makes_a_cartridge() {
+        use crate::volume::attested_launcher;
+
+        let dir = std::env::temp_dir().join(format!(
+            "gacasy-installer-attest-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir");
+
+        // No file at all.
+        assert_eq!(attested_launcher(&dir), None);
+
+        // A file with the right name and nothing else — what running it used to
+        // accept.
+        std::fs::write(dir.join(crate::cartridge::LAUNCHER_NAME), b"MZ not signed")
+            .expect("write");
+        assert_eq!(attested_launcher(&dir), None);
+
+        // A well-formed signature block from a key this build does not carry.
+        let signature = "untrusted comment: signature from a key we do not have\n\
+                         RUQAAAAAAAAAAOaGxHqZQ0KtvVCJ6iKzXG8bFvKZ0V0kZ1qWzKz0hVYQ4rZ8Xk1t\n\
+                         trusted comment: gacasy-launcher 9.9.9 2026-07-30\n\
+                         AAAA==\n";
+        let signed = sigblock::attach(b"MZ signed by someone else", signature);
+        std::fs::write(dir.join(crate::cartridge::LAUNCHER_NAME), signed).expect("write");
+        assert_eq!(attested_launcher(&dir), None);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[cfg(windows)]
     #[test]
     fn the_drive_windows_is_on_is_refused() {

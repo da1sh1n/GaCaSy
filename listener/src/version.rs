@@ -4,7 +4,7 @@
 // v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! `x.y.z`, and asking a launcher for its own.
+//! `x.y.z` — this listener's own, and a launcher's as its signature states it.
 //!
 //! **x is shared by every GaCaSy program** and means "the way these programs
 //! talk to each other"; y and z belong to each program alone. Two programs are
@@ -12,34 +12,24 @@
 //! check before handing control to a cartridge built against a different
 //! generation of the system.
 //!
-//! # Why it is safe to ask
+//! # Where a launcher's version comes from
 //!
-//! [`probe`] runs `launcher.exe --version` and believes the answer. That is only
-//! defensible because it happens strictly *after* [`crate::trust`] has verified
-//! the binary's signature: at that point it is a program we signed, and taking
-//! its word about itself is reasonable. Doing this before the signature check
-//! would mean executing an untrusted binary in order to decide whether to
-//! execute it.
+//! Out of its signature, via [`crate::trust`] — `xtask` writes `<role> <version>
+//! <date>` into minisign's trusted comment, which is signed alongside the
+//! payload and so cannot be edited after the fact.
+//!
+//! This used to run `launcher.exe --version` and believe the answer, which was
+//! defensible only because it happened strictly after the signature check. It is
+//! gone, and the reason is worth keeping: an answer that is already inside the
+//! thing you verified does not need to be asked for, and asking cost a spawn, a
+//! five-second bounded wait on the message-pump thread, and a second and third
+//! open of a file on a disk a stranger controls.
 //!
 //! # Why the output is bare
 //!
 //! Every GaCaSy exe prints exactly `x.y.z` and nothing else — no program name,
 //! no prefix. It is one line for a human and one line to parse, and the two
 //! having the same shape is what keeps them from drifting apart.
-
-use std::path::Path;
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
-
-/// How long a launcher gets to answer. Generous for a process that only has to
-/// print a string and exit — and bounded because the Windows listener asks from
-/// its message-pump thread, where an unbounded wait would freeze every later
-/// device event behind one wedged binary.
-pub(crate) const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
-
-/// How often to check whether it has exited. `wait_timeout` is not in std, and
-/// polling is both portable and cheap at this granularity.
-const POLL: Duration = Duration::from_millis(25);
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct Version {
@@ -67,9 +57,10 @@ pub fn print() {
 
 /// Parses exactly `x.y.z`.
 ///
-/// Strict on purpose. A launcher that answers something else is not a launcher
-/// whose compatibility we can reason about, and guessing at "0.2" or
-/// "0.2.0-rc1" would be inventing a claim the binary never made.
+/// Strict on purpose, and it is fed the version field of a signed comment. A
+/// launcher whose signature says something else is not one whose compatibility
+/// we can reason about, and guessing at "0.2" or "0.2.0-rc1" would be inventing
+/// a claim the signature never made.
 pub fn parse(text: &str) -> Option<Version> {
     let mut parts = text.trim().split('.');
     let mut next = || parts.next()?.trim().parse::<u64>().ok();
@@ -79,63 +70,4 @@ pub fn parse(text: &str) -> Option<Version> {
         patch: next()?,
     };
     parts.next().is_none().then_some(version)
-}
-
-/// Asks a verified launcher for its version.
-///
-/// `None` means it could not be established — the binary would not start, took
-/// too long, or said something unparseable. That is deliberately distinct from
-/// "said a different major": the caller launches anyway on `None` and refuses on
-/// a genuine mismatch, because a signed binary that fumbles the probe is a
-/// weaker signal than one that clearly states an incompatible version.
-pub fn probe(exe: &Path) -> Option<Version> {
-    // No `current_dir` on the volume: this is a question, not a launch, and the
-    // launcher seeds content into its working directory when it really starts.
-    //
-    // Piped stdout matters more than it looks on Windows. The launcher is built
-    // `windows_subsystem = "windows"`, so it has no console — but that only
-    // means Windows allocates none. `Command` creates a pipe and passes it in
-    // STARTUPINFO, so the child's stdout handle is valid and `println!` lands
-    // here.
-    let child = Command::new(exe)
-        .arg("--version")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-
-    answer(child, PROBE_TIMEOUT)
-}
-
-/// Waits for a probe to finish and reads its first line, killing it on timeout.
-///
-/// Split out from [`probe`] so the giving-up path can be tested with a process
-/// chosen to never answer — the case that matters most here, since it is the one
-/// that would otherwise wedge the Windows message pump.
-pub(crate) fn answer(mut child: std::process::Child, timeout: Duration) -> Option<Version> {
-    let deadline = Instant::now() + timeout;
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(POLL),
-            // Timed out, or waiting itself failed. Kill it either way: a version
-            // probe must not leave a process behind.
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
-        }
-    }
-
-    // Safe to read only after it has exited: a version string is far smaller
-    // than the pipe buffer, so the child cannot have blocked on a full pipe
-    // while we were polling.
-    let mut output = String::new();
-    if let Some(mut stdout) = child.stdout.take() {
-        use std::io::Read;
-        stdout.read_to_string(&mut output).ok()?;
-    }
-    parse(output.lines().next()?)
 }

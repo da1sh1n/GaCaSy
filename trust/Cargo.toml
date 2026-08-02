@@ -1,0 +1,28 @@
+[package]
+name = "trust"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+
+# The decision "may this binary run?", in one place. It used to live in the
+# listener alone, which was fine while the listener was the only thing that ran
+# a launcher — it stopped being fine the moment the installer started probing
+# one. A second implementation of a trust check is a second thing to get wrong,
+# and the one that got it wrong was the one written later.
+#
+# Not folded into sigblock: that crate is linked into build scripts and holds
+# its "no dependencies, ever" line for a reason. This one needs a verifier.
+[dependencies]
+# Finding the signature inside the binary. Zero dependencies of its own.
+sigblock = { path = "../sigblock" }
+
+# Checking it. Verify-only on purpose — nothing that ships has any business
+# being able to sign, and the signing half (scrypt, key handling) is weight it
+# would carry for nothing. That lives in xtask.
+minisign-verify = "0.2.5"
+
+# Tests only, and never linked into anything shipped: the round trip is only
+# worth something if the thing that signs is the reference implementation
+# rather than a second opinion from the same crate that verifies.
+[dev-dependencies]
+minisign = "0.9.1"

@@ -52,6 +52,12 @@ toml = "1.1.4"
 # Reading this exe's own signature back out, for `--signature`.
 sigblock = { path = "../sigblock" }
 
+# Deciding whether a `launcher.exe` already on a drive is one of ours, before
+# believing anything it says. The same crate and the same call the listener
+# makes: this installer used to answer that question by running the file, which
+# is the one thing the listener is careful never to do.
+trust = { path = "../trust" }
+
 # Unpacking the two programs this installer carries, packed by build.rs. Only the
 # decoder is reachable from the binary, so the linker drops the encoder half.
 #
@@ -70,12 +76,16 @@ flate2 = { version = "1.1.9", default-features = false, features = ["rust_backen
 # installer neither makes nor holds any secret.
 
 # Checking, at build time, that the launcher and listener being embedded are
-# signed by a key the embedded listener will accept. Getting the sign-then-build
-# order wrong otherwise produces an installer that works, writes a cartridge that
-# looks right, and is silently ignored by every listener. See build.rs.
+# signed by a key the embedded listener will accept — and are each the program
+# their slot is for. Getting the sign-then-build order wrong otherwise produces
+# an installer that works, writes a cartridge that looks right, and is silently
+# ignored by every listener. See build.rs.
+#
+# The same crate as the runtime dependency above, deliberately: a build-time
+# check that reached its conclusion differently from the shipped listener would
+# be worth less than no check at all.
 [build-dependencies]
-sigblock = { path = "../sigblock" }
-minisign-verify = "0.2.5"
+trust = { path = "../trust" }
 
 # Packing the payload. A build dependency too, so the compressor never ships.
 flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"] }
