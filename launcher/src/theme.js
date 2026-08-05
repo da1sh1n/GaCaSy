@@ -13,10 +13,9 @@ const num = (value, fallback) => (Number.isFinite(value) ? value : fallback);
 export const setVar = (name, value) => root_style.setProperty(name, value);
 
 // Duplicated from Rust and MUST stay in step: window::size picks the window
-// from these three before this page loads. See src/constants.rs.
-export const PAD = num(ui.borderGap, 36);
+// from these two before this page loads. See src/constants.rs.
+export const PAD = num(ui.borderGap, 56);
 export const GAP = num(ui.imageGap, 32);
-export const TOOLBAR_BAND = num(ui.toolbarBand, 44);
 
 export const MOVE_MS = 350;
 export const OUTRO_MS = 320;
@@ -134,7 +133,6 @@ const orPalette = (name, value, fallback) => setVar(name, (value || "").trim() |
 px("--border-gap", ui.borderGap);
 px("--image-gap", ui.imageGap);
 px("--corner-radius", ui.cornerRadius);
-px("--toolbar-band", ui.toolbarBand);
 px("--loading-text-gap", ui.loadingTextGap);
 px("--error-border-width", ui.errorBorderWidth);
 
@@ -152,6 +150,16 @@ if (Number.isFinite(ui.missingDim)) setVar("--missing-dim", ui.missingDim);
 // The shadow is the secondary — that is what the 30% of the palette is for.
 // Solid for `fade` px out from the cover edge, then blurred to nothing,
 // reaching exactly `size` and no further.
+//
+// Left as two lengths rather than one composed box-shadow: the stylesheet
+// multiplies both by --cover-scale, so the shadow around a cover shrunk for the
+// screen is shrunk with it.
 const shadow_size = num(ui.shadowSize, 24);
 const spread = Math.max(0, Math.min(num(ui.shadowFade, 0), shadow_size));
-setVar("--shadow", `0 0 ${shadow_size - spread}px ${spread}px ${toHex(secondary)}`);
+setVar("--shadow-blur", (shadow_size - spread) + "px");
+setVar("--shadow-spread", spread + "px");
+
+// How far outside the stage the row's viewport has to reach for the shadow and
+// the selected cover's 6px lift to be drawn rather than clipped square. Taken
+// from the shadow a cartridge actually asked for, so a big one is not cut off.
+setVar("--cover-room", (shadow_size + 8) + "px");

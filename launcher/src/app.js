@@ -6,7 +6,7 @@
 
 // ########## STARTUP ##########
 
-import { imgs, cards, select, sizeNameplate } from "./cards.js";
+import { imgs, cards, select } from "./cards.js";
 import { layout } from "./layout.js";
 import { order, applyStoredMode, sizeSegments, syncSearchVisibility } from "./row.js";
 import { isLaunching } from "./launch.js";
@@ -18,7 +18,6 @@ function refit() {
   layout();
   syncSearchVisibility();
   sizeSegments();
-  sizeNameplate();
 }
 
 applyStoredMode();
@@ -44,8 +43,5 @@ window.addEventListener("resize", () => {
 // fallback may not be, so every width measured before it existed used different
 // metrics.
 if (document.fonts && document.fonts.ready) {
-  document.fonts.ready.then(() => {
-    sizeSegments();
-    sizeNameplate();
-  });
+  document.fonts.ready.then(sizeSegments);
 }

@@ -19,13 +19,15 @@ use std::time::Duration;
 
 // ── Window size (window.rs) ──────────────────────────────────────────────
 // Each cover wants to be its own native size. The window then wraps a row of
-// them: width = covers + gaps + margins on both sides, height = one cover +
-// the toolbar band above + ONE margin below.
+// them: one margin on every side and nothing else. The cover row's top edge is
+// `border_gap` from the top of the window, its bottom edge `border_gap` from
+// the bottom, its sides `border_gap` from the sides.
 //
-// The vertical budget has one margin, not two, because TOOLBAR_BAND already
-// includes the gap under the toolbar (see its own comment). Counting a full
-// margin on top of that put a second gap in the same place and left a hole
-// between the controls and the covers.
+// The toolbar and the name line take no height of their own — they sit INSIDE
+// the top and bottom margins, pinned to the window rather than to the covers.
+// That is what makes the row's box symmetric, and it makes `border_gap` the one
+// knob for every piece of spacing in the window. See src/style.css, which
+// places both of them.
 //
 // How many games there are decides how WIDE the window is, and nothing else.
 // The row holds every game up to what MAX_WIDTH_FRACTION of the screen allows,
@@ -57,22 +59,6 @@ pub const MAX_HEIGHT_FRACTION: f64 = 0.80;
 /// narrow to hold this many at target size shrinks the covers until it can.
 pub const MIN_VISIBLE_COVERS: f64 = 3.0;
 
-/// The toolbar's height plus the gap under it: the strip along the top of the
-/// window that the covers do not get.
-///
-/// The controls are 26px and sit centred in this, so the number also decides
-/// how much air there is between them and the top of the covers — (band − 26)/2
-/// on each side. **This is the one knob for that gap**: the vertical budget
-/// deliberately spends no border margin at the top, so widening the gap here is
-/// the only way to widen it at all.
-///
-/// Reproduced in the page as `--toolbar-band` (and `TOOLBAR_BAND` in its
-/// script), the same way border_gap and image_gap reach it as PAD and GAP, so
-/// both sides fit the covers into the same box. Not a config.toml knob — it is
-/// the size of a control, not a matter of taste, and getting it wrong shows up
-/// as covers that don't fit their window.
-pub const TOOLBAR_BAND: f64 = 56.0;
-
 // Native cover resolution, so a cover is never scaled up past it. Assumes the
 // 600x900 (2:3) cover art this launcher is built around.
 pub const COVER_NATIVE_WIDTH: f64 = 600.0;
@@ -84,13 +70,19 @@ pub const FALLBACK_WINDOW_H: f64 = 800.0;
 
 // ── Look and feel (config.rs) ────────────────────────────────────────────
 // Fallbacks for the knobs exposed in config.toml, used when a key is absent or
-// unusable. They match the values baked into src/style.css, so an
-// existing install with no new keys renders exactly as before. The seed in
-// src/config.toml is free to ship different values — these are the floor under
-// a config that doesn't mention a setting at all, not the house style. The two
-// spacing values (border gap around the covers and gap between them) are also
-// used by the window-sizing math and mirrored as PAD/GAP in src/app.js, so
-// the computed size and the CSS layout agree.
+// unusable. They match the values baked into src/style.css, so both sides of
+// the page agree without talking to each other. The seed in src/config.toml is
+// free to ship different values — these are the floor under a config that
+// doesn't mention a setting at all, not the house style. The two spacing values
+// (border gap around the covers and gap between them) are also used by the
+// window-sizing math and mirrored as PAD/GAP in src/theme.js, so the computed
+// size and the CSS layout agree.
+//
+// DEFAULT_BORDER_GAP is 56 rather than the 36 it was, because the margin now
+// has to hold the toolbar above the covers and the name line below them. The
+// bottom furniture takes a fixed 42px, so a gap under 42 puts the name line on
+// the art and one under 30 puts the toolbar on it. Nothing clamps that — a
+// cartridge is free to ask for a layout that doesn't work.
 
 // ── The palette: 60 / 30 / 10 ────────────────────────────────────────────
 // Three colors carry the whole launcher, in the proportions the rule is named
@@ -111,7 +103,7 @@ pub const DEFAULT_PRIMARY_COLOR: &str = "#191325"; // violet
 pub const DEFAULT_SECONDARY_COLOR: &str = "#3D1F37"; // plum
 pub const DEFAULT_ACCENT_COLOR: &str = "#925E37"; // caramel
 
-pub const DEFAULT_BORDER_GAP: f64 = 36.0; // empty space between window edge and covers
+pub const DEFAULT_BORDER_GAP: f64 = 56.0; // margin on every side of the cover row
 pub const DEFAULT_IMAGE_GAP: f64 = 32.0; // gap between adjacent covers
 pub const DEFAULT_CORNER_RADIUS: f64 = 14.0; // cover corner rounding
 /// The window's own corners, in logical pixels — used only where Windows won't

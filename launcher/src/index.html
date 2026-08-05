@@ -52,7 +52,28 @@
     </div>
   </div>
 
-  <div id="gallery"><div id="grid"></div></div>
+  <!-- The one box the layout is built around: the cover row, one border gap
+       from every window edge. Everything else that is drawn — the toolbar
+       above, the name line and the scroll bar below — sits inside those margins
+       rather than taking room from this. -->
+  <div id="stage">
+    <div id="gallery"><div id="grid"></div></div>
+    <!-- Shown in place of the gallery when the catalog is empty. Hidden by
+         default: the common case is a cartridge with games, and a message that
+         flashes before the covers appear would read as an error that wasn't one.
+
+         Three empty plates at the real cover size rather than a line of text in
+         the middle of a void — an empty shelf should look like an empty shelf,
+         which says "nothing has been put here yet" where bare text reads as a
+         page that failed to load. Sized by layout(), from the same numbers the
+         covers would have used. -->
+    <div id="empty">
+      <div id="empty-plates" aria-hidden="true">
+        <span class="plate"></span><span class="plate"></span><span class="plate"></span>
+      </div>
+      <p id="empty-message">No games on this cartridge</p>
+    </div>
+  </div>
   <!-- One cover, cloned per game by cards.js. Markup belongs here rather than
        in a dozen createElement calls; the grip is only visible while
        arranging. -->
@@ -60,7 +81,13 @@
     <button class="card" type="button">
       <span class="cover">
         <img alt="" />
-        <span class="sign"></span>
+        <!-- The sign and the message, as one centred stack ON the art. The
+             message used to hang below the cover, where the row's own clipping
+             sheared it and it collided with the name line. -->
+        <span class="mark">
+          <span class="sign"></span>
+          <span class="note"></span>
+        </span>
         <span class="grip">
           <svg width="18" height="4" viewBox="0 0 18 4" aria-hidden="true">
             <circle cx="2" cy="2" r="1.6" /><circle cx="9" cy="2" r="1.6" />
@@ -68,30 +95,13 @@
           </svg>
         </span>
       </span>
-      <span class="note"></span>
     </button>
   </template>
-  <!-- Shown in place of the gallery when the catalog is empty. Hidden by
-       default: the common case is a cartridge with games, and a message that
-       flashes before the covers appear would read as an error that wasn't one.
-
-       Three empty plates at the real cover size rather than a line of text in
-       the middle of a void — an empty shelf should look like an empty shelf,
-       which says "nothing has been put here yet" where bare text reads as a
-       page that failed to load. Sized by layout(), from the same numbers the
-       covers would have used. -->
-  <div id="empty">
-    <div id="empty-plates" aria-hidden="true">
-      <span class="plate"></span><span class="plate"></span><span class="plate"></span>
-    </div>
-    <p id="empty-message">No games on this cartridge</p>
-  </div>
-
-  <!-- The selected game's name, on one shared line in the gap under the row —
-       not a label per cover. Thirty names under thirty covers is noise, and
-       the only one worth reading is the one being pointed at. Living in the
-       border gap is also what keeps every cover exactly as tall as its image,
-       so Rust's window sizing needs no adjustment. -->
+  <!-- The selected game's name, on one shared line in the bottom margin — not a
+       label per cover. Thirty names under thirty covers is noise, and the only
+       one worth reading is the one being pointed at. Living in the margin
+       rather than in the stage is what keeps the cover row the same distance
+       from the bottom of the window as from the top. -->
   <div id="nameplate"></div>
 
   <div id="scrollbar"><div id="scrollbar-thumb"></div></div>

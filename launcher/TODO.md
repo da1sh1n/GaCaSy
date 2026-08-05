@@ -13,8 +13,4 @@ The chrome is all one size. The next step up the 11px grid is 22px, which is nam
 territory, so hierarchy in the toolbar has to come from the colour ramp and the pill fill
 rather than from a size in between.
 
-- [ ] **The name line lost its size at the default `border_gap`.** It was 16.2px; on the grid
-      the gap at `border_gap = 36` only holds one 11px step, so it now matches the toolbar
-      instead of reading as a plate. Two steps needs `border_gap >= 43`. Worth deciding
-      whether to raise the seed default — it widens the window's margins, which is a look
-      change beyond the type, so it is left alone rather than changed quietly.
+Nothing open.

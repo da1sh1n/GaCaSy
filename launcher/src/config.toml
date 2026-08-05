@@ -38,15 +38,16 @@ show_captions = true
 # (hex like "#1b1229", or "rgba(...)" for translucency). Missing or invalid
 # values fall back to the defaults shown here.
 
-# Empty space between the window edge and the covers — at the sides and below
-# them. Not above: the toolbar strip along the top already includes the gap
-# under itself, and spending a margin there too put the same space in twice.
+# Empty space between the window edge and the covers, on all four sides. The
+# covers sit exactly this far from every edge, which is what makes the row's box
+# symmetric in the window.
 #
-# The bottom one has a job beyond breathing room. It is where the selected
-# game's name and the scroll bar live, and the name's size is taken from
-# whatever height is left over — so a smaller number here means a smaller name,
-# not a cramped one.
-border_gap = 44
+# The top and bottom margins have a job beyond breathing room: the toolbar sits
+# inside the top one and the selected game's name and the scroll bar inside the
+# bottom one. They take a fixed 30px and 42px respectively, so this number is
+# what is left over as air — below about 42 the name line starts to sit on the
+# covers.
+border_gap = 56
 
 # Gap between adjacent covers.
 image_gap = 32

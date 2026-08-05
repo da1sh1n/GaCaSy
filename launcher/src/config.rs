@@ -318,7 +318,7 @@ fn known_settings() -> Vec<(&'static str, &'static str, String)> {
         ),
         (
             "border_gap",
-            "Empty space between the window edge and the covers.",
+            "Empty space between the window edge and the covers, on all four sides.",
             DEFAULT_BORDER_GAP.to_string(),
         ),
         (

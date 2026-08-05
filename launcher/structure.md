@@ -118,10 +118,11 @@ whole stylesheet is written against rather than a preference:
   pixel is enough to undo it — so the value is rounded to whole device pixels for whatever
   display the window actually opened on. The literal in `:root` is what that comes to at
   100%, kept so a page running without the script is still on the grid.
-- **The name line is the only thing that varies**, and it steps rather than scales:
-  `sizeNameplate()` gives it one unit or two from the gap actually available. It used to
-  interpolate across 11–22px, which under a pixel face is a continuum of blurry with two
-  sharp points in it.
+- **The name line is the one rule that is not a single unit** — it takes two of them
+  whole. It used to be cut from whatever `border_gap` had left over, dropping to one unit
+  on a tighter cartridge; the band is its own fixed size now, so both units are always
+  there. It has never interpolated: under a pixel face 11–22px is a continuum of blurry
+  with two sharp points in it.
 - **Tracking is `0` everywhere.** `em` letter-spacing resolves to fractions of a pixel and
   walks glyph origins off the grid the size was chosen to land on.
 
@@ -186,12 +187,16 @@ one list has to be tested on a built `output/launcher.exe`, not just in dev.
   at the size it was drawn at, on any display. The rule this section states was not true
   until the target became the native size.
 
-  **The vertical budget is `TOOLBAR_BAND + cover + one border_gap`** — one margin, at the
-  bottom. `TOOLBAR_BAND` is the toolbar's height *plus the gap under it*, so a margin on top
-  of it put the same space in twice and left a hole between the controls and the covers.
-  The band is therefore the only knob for that gap. Margins, gap and the band are in
-  **logical (CSS) px** so they match the page's `PAD` / `GAP` / `TOOLBAR_BAND`; the page's
-  `layout()` reproduces the same fit from the window height alone (scaling down only).
+  **The budget is one `border_gap` on every side** — `cover + 2 * border_gap` on both axes.
+  The cover row's top edge is one margin from the top of the window, its bottom edge one
+  margin from the bottom, its sides one from the sides, so the box the covers sit in is
+  symmetric. Nothing else takes height: **the toolbar and the name line sit inside those
+  margins**, pinned to the window rather than stacked against the covers, which is what
+  makes `border_gap` the single knob for every piece of spacing in the window. The bottom
+  margin spends a fixed 42px on the name line and the scroll bar and the top a fixed 30px
+  on the toolbar; the rest of each is air. Margins and gap are in **logical (CSS) px** so
+  they match the page's `PAD` / `GAP`; the page's `layout()` reproduces the same fit from
+  the window height alone (scaling down only).
 - **Rounded corners come from Windows, not the page.** `window::round_corners` asks
   Windows 11 for them (`DwmSetWindowAttribute` / `DWMWA_WINDOW_CORNER_PREFERENCE`, which is
   anti-aliased and keeps the shadow) and falls back to clipping the window to a rounded
@@ -233,10 +238,15 @@ One row of covers in a horizontal scroll viewport, with a toolbar across the top
   *contents* rather than the bar, because closing has to stay possible while a launch hangs;
   and an empty cartridge hides those contents rather than the row, for the same reason.
 - **One name line, not thirty captions.** `show_captions` now governs a single line in the
-  gap under the row, naming whichever cover is selected and following it along the row. Per
-  card it was noise, and it is what keeps every card exactly as tall as its image so the
-  sizing contract with `window.rs` needs no adjustment. The one piece of text in the UI
-  that is not exactly one `--type-unit` — see [The 11px grid](#the-11px-grid).
+  bottom margin, naming whichever cover is selected and following it along the row. Per
+  card it was noise, and living in the margin is what keeps every card exactly as tall as
+  its image so the sizing contract with `window.rs` needs no adjustment. The one piece of
+  text in the UI that is not exactly one `--type-unit` — see
+  [The 11px grid](#the-11px-grid).
+- **A card's own message is drawn on its art**, centred under the "missing" sign, not hung
+  below the cover. Below it the row's clipping sheared it, a two-line cap cut it again, and
+  it landed on top of the name line — which the page had to hide to compensate. On the art
+  it is clear of all three, and the name line no longer has to give way to it.
 - **Selection is one index**, fed by both hover and focus, and it decides three things at
   once: which cover is lifted, which is clear of the veil, and which one the name line
   names. Deliberately not a separate hover state and focus state — those can disagree, and

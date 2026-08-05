@@ -6,7 +6,7 @@
 
 // ########## THE COVERS ##########
 
-import { PAD, TYPE_UNIT, setVar } from "./theme.js";
+import { PAD } from "./theme.js";
 import { games, grid, nameplate, arrange_btn } from "./dom.js";
 
 const template = document.getElementById("card-template");
@@ -58,7 +58,6 @@ export const imgs = games.map((game, index) => {
 // describes another. The focus RING is still drawn by :focus-visible.
 
 let selected = -1;
-let note_covers_name = false;
 
 export function select(index) {
   if (index === selected) return;
@@ -69,42 +68,24 @@ export function select(index) {
   if (cards[selected]) cards[selected].classList.add("selected");
 
   nameplate.textContent = index >= 0 ? games[index].name : "";
-  yieldToNote();
   placeNameplate();
-}
-
-// A missing or failed cover already carries a message where the name would go,
-// and that message is the more important of the two. Settled here rather than
-// inside placeNameplate(), which runs per scroll frame and must not force a
-// style flush on a webview with no GPU to spare.
-export function yieldToNote() {
-  const note = cards[selected] && cards[selected].querySelector(".note");
-  note_covers_name = !!note && note.textContent !== "" &&
-    getComputedStyle(note).display !== "none";
-  nameplate.style.visibility = note_covers_name ? "hidden" : "";
 }
 
 // The name sits under the cover it names, clamped inside the border gap so a
 // long name at either end stays on screen. Centred on the window instead would
 // put the leftmost cover's name under the middle one.
+//
+// It no longer has to give way to a card's own message: that message is drawn
+// on the art now, not in this band, so the two cannot collide and a missing
+// game keeps its name on the line.
 export function placeNameplate() {
-  if (selected < 0 || !cards[selected] || note_covers_name) return;
+  if (selected < 0 || !cards[selected]) return;
 
   const rect = cards[selected].getBoundingClientRect();
   const half = nameplate.offsetWidth / 2;
   const centre = rect.left + rect.width / 2;
   const clamped = Math.max(PAD + half, Math.min(window.innerWidth - PAD - half, centre));
   nameplate.style.left = (clamped - half).toFixed(1) + "px";
-}
-
-// Taken from the gap that is actually there, so a tight border_gap gets a
-// smaller line rather than a clipped one. Steps rather than scales: under a
-// pixel face there is nothing between 11 and 22px that is not blurry.
-export function sizeNameplate() {
-  // Must agree with #nameplate's height in style.css.
-  const band = Math.max(0, PAD - 17);
-  const steps = Math.min(2, Math.max(1, Math.floor((band * 0.85) / TYPE_UNIT)));
-  setVar("--nameplate-size", (steps * TYPE_UNIT).toFixed(3) + "px");
 }
 
 // ========== Arrange Mode ==========

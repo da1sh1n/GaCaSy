@@ -63,6 +63,30 @@ if ($Clean) {
     Invoke-Step 'cargo clean' { cargo clean }
 }
 
+# Cargo never removes a stale artifact, and target/ has no upper bound. Two
+# things are true of the pile, and only one of them is provable from here.
+#
+# Provable: a different rustc rehashes every unit in the tree, so the moment the
+# compiler changes, everything already in target/ is dead — and the rebuild that
+# makes cleaning look expensive was going to happen on this run anyway. Clean.
+#
+# Not provable: size. A large target/ is just as likely to be one honest cold
+# build as it is to be junk, and cargo exposes no way to tell them apart. Say so
+# and leave it alone; deleting a good build to reclaim disk is the user's call.
+$TARGET_SIZE_WARN_BYTES = 3GB
+$RUSTC_STAMP_PATH = 'target/.rustc-version'
+
+$rustc_version = (rustc -V | Out-String).Trim()
+if ($rustc_version -and (Test-Path $RUSTC_STAMP_PATH)) {
+    $stamped_version = (Get-Content $RUSTC_STAMP_PATH -Raw).Trim()
+    if ($stamped_version -ne $rustc_version) {
+        Write-Host "Toolchain changed since the last build — everything in target/ is stale." -ForegroundColor Yellow
+        Write-Host "  was: $stamped_version" -ForegroundColor DarkGray
+        Write-Host "  now: $rustc_version" -ForegroundColor DarkGray
+        Invoke-Step 'cargo clean' { cargo clean }
+    }
+}
+
 # Everything below here — including the build order — lives in xtask/src/release.rs.
 Invoke-Step 'building and signing launcher, listener, installer' { cargo run -p xtask -- release }
 
@@ -71,3 +95,15 @@ Write-Host 'Done. Signed binaries are in target/release/:' -ForegroundColor Gree
 Get-ChildItem 'target/release' -Filter '*.exe' |
     Where-Object { $_.BaseName -in @('launcher', 'listener', 'installer') } |
     ForEach-Object { Write-Host ('  {0,-14} {1,10:N0} bytes' -f $_.Name, $_.Length) }
+
+# Written last, so a build that failed leaves the old stamp and gets one more
+# chance to clean. It lives inside target/ on purpose: cargo clean takes it too.
+Set-Content -Path $RUSTC_STAMP_PATH -Value $rustc_version
+
+$target_bytes = (Get-ChildItem 'target' -Recurse -Force -File -ErrorAction SilentlyContinue |
+    Measure-Object -Property Length -Sum).Sum
+if ($target_bytes -gt $TARGET_SIZE_WARN_BYTES) {
+    Write-Host ''
+    Write-Host ('target/ is {0:N1} GB. If that is more than this build needs, reclaim it with: cargo clean' -f
+        ($target_bytes / 1GB)) -ForegroundColor Yellow
+}

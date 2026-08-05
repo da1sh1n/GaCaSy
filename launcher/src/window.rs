@@ -7,10 +7,9 @@
 //! How big the window is, and where it sits.
 //!
 //! The size is decided here, before the page ever loads: no measure-and-report
-//! round-trip. The page (`src/app.js`) then reproduces the same fit
-//! independently from the same numbers (the gap, the border gap and the toolbar
-//! band reach it as `GAP`, `PAD` and `TOOLBAR_BAND`), so the two agree without
-//! talking to each other.
+//! round-trip. The page (`src/layout.js`) then reproduces the same fit
+//! independently from the same two numbers (the gap and the border gap reach it
+//! as `GAP` and `PAD`), so the two agree without talking to each other.
 //!
 //! # What the game count does and doesn't decide
 //!
@@ -31,8 +30,8 @@ use tao::dpi::{PhysicalPosition, Position};
 
 use crate::constants::*;
 
-/// The window size in logical (CSS) pixels — it wraps a row of covers plus the
-/// toolbar band, with the covers scaled to satisfy the screen's caps.
+/// The window size in logical (CSS) pixels — a row of covers with one `margin`
+/// on every side, the covers scaled to satisfy the screen's caps.
 ///
 /// Logical pixels so these numbers, and the gap/margin, are the same units the
 /// CSS uses — the computed size and the page layout stay in step at any DPI.
@@ -70,13 +69,12 @@ pub fn size<T>(
     let target_w = COVER_NATIVE_WIDTH;
     let target_h = COVER_NATIVE_HEIGHT;
 
-    // What's left of the screen once the caps and the fixed furniture are taken
-    // out. ONE margin vertically, not two: TOOLBAR_BAND is the toolbar's height
-    // *plus the gap under it*, so the strip across the top already includes the
-    // space between the controls and the covers. Adding a full margin on top of
-    // it counted that gap twice and left a visible hole.
+    // What's left of the screen once the caps and the margins are taken out.
+    // Two margins on each axis, and nothing else: the toolbar and the name line
+    // live inside the top and bottom margins rather than beside them, so the
+    // cover row's box is the same distance from all four window edges.
     let width_room = MAX_WIDTH_FRACTION * screen_w - 2.0 * margin;
-    let height_room = MAX_HEIGHT_FRACTION * screen_h - margin - TOOLBAR_BAND;
+    let height_room = MAX_HEIGHT_FRACTION * screen_h - 2.0 * margin;
 
     // The largest scale (never above 1) that fits one cover under the height cap
     // and MIN_VISIBLE_COVERS of them under the width cap. Note what is *not*
@@ -99,9 +97,7 @@ pub fn size<T>(
         (game_count as f64).clamp(MIN_VISIBLE_COVERS, max_columns.max(MIN_VISIBLE_COVERS));
 
     let width = columns * cover_w + (columns - 1.0) * gap + 2.0 * margin;
-    // Margin on the bottom only — see `height_room` above. The bottom is where
-    // the name line and the scrollbar live, so it is the margin that has a job.
-    let height = cover_h + margin + TOOLBAR_BAND;
+    let height = cover_h + 2.0 * margin;
     (width.max(1.0), height.max(1.0))
 }
 

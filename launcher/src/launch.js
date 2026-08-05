@@ -8,7 +8,7 @@
 
 import { MOVE_MS, OUTRO_MS, MIN_LOADING_MS, TRACK_GAP, setVar } from "./theme.js";
 import { games, send, status_line } from "./dom.js";
-import { cards, imgs, isArranging, yieldToNote, placeNameplate } from "./cards.js";
+import { cards, imgs, isArranging, placeNameplate } from "./cards.js";
 
 // One game at a time: while a launch is in flight every other cover is on its
 // way off screen anyway.
@@ -136,9 +136,6 @@ window.__launchOutcome = function (index, ok, message) {
       unpinCards();
       card.classList.add("failed");
       card.querySelector(".note").textContent = message || "Failed to start";
-      // The note has just appeared under what is very likely the selected
-      // cover — it was clicked. Let it have the line.
-      yieldToNote();
       placeNameplate();
       state = "idle";
     }, MOVE_MS);

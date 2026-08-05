@@ -348,13 +348,9 @@ fn init_script(base_dir: &Path, config: &Config, games: &[catalog::Game]) -> Str
         "loadingTextGap": config.loading_text_gap,
         "toolbarColor": config.toolbar_color,
         "scrollbarColor": config.scrollbar_color,
-        // Not config.toml knobs: two of the launcher's own numbers, sent along
-        // with the look-and-feel so the page reads one object. The toolbar band
-        // is the strip `window::size` reserved across the top and the page must
-        // fit its covers under; sending it beats the page guessing at a height
-        // Rust has already committed to.
-        "toolbarBand": TOOLBAR_BAND,
-        // Milliseconds, because that is what the page's timers take.
+        // Not a config.toml knob, sent along with the look-and-feel so the page
+        // reads one object. Milliseconds, because that is what the page's timers
+        // take.
         "minLoadingAfterFail": MIN_LOADING_AFTER_FAIL.as_millis() as u64,
     });
 

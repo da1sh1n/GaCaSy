@@ -9,12 +9,17 @@
   Served over app:// alongside index.html and app.js. In dev these are read
   live from src/, so edits show up on the next launch with no rebuild.
 
-  Three numbers in here are duplicated from Rust and MUST stay in step with
-  it: --border-gap, --image-gap and --toolbar-band mirror config.toml's
-  border_gap / image_gap and constants::TOOLBAR_BAND. Rust sizes the window
-  from them before this page loads, and app.js's layout() fits the covers
-  into that same box from the same three numbers. See src/constants.rs, whose
-  header explains why the duplication is deliberate rather than accidental.
+  Two numbers in here are duplicated from Rust and MUST stay in step with it:
+  --border-gap and --image-gap mirror config.toml's border_gap / image_gap.
+  Rust sizes the window from them before this page loads, and layout.js fits
+  the covers into that same box from the same two numbers. See
+  src/constants.rs, whose header explains why the duplication is deliberate
+  rather than accidental.
+
+  Everything else placed in here — the toolbar, the name line, the scroll bar —
+  is the page's own business. Rust reserves no room for any of it: they sit
+  inside the margins the window already had, which is what makes the cover row
+  the same distance from all four edges.
 */
 
 /* Departure Mono v1.500, by Helena Zhang, under the SIL Open Font License 1.1 —
@@ -31,8 +36,8 @@
    font-size of its own. Every one of them is `var(--type-unit)`, which app.js
    computes from devicePixelRatio so the size lands on whole DEVICE pixels — an
    11px CSS rule is 13.75 device pixels at 125% scaling, and that quarter pixel
-   is all it takes. The name line is the only thing that varies, and it steps by
-   whole units rather than scaling (see #nameplate, and sizeNameplate in app.js).
+   is all it takes. The name line is the one rule that is not a single unit —
+   it takes two of them whole, never a size in between (see #nameplate).
 
    Two things follow from that, worth knowing rather than discovering:
 
@@ -86,9 +91,14 @@
   --line: #694037;       /* secondary lifted until a hairline shows */
   --plate: #3d1f37;      /* the rectangle under a cover with no art */
   --primary-rgb: 25, 19, 37;
-  --border-gap: 36px;
+  --border-gap: 56px;
   --image-gap: 32px;
   --corner-radius: 14px;
+  /* Cover chrome is drawn for a cover at its native 600x900 and multiplied by
+     this, which layout() sets per card from the scale it fitted that cover at.
+     Without it a shrunk cover keeps a full-size blur and radius and reads far
+     heavier than it was drawn — at 41% the 26px blur is 2.4x too much. */
+  --cover-scale: 1;
   /* One radius for every control in the chrome — the order track and its
      pill, the arrange toggle, the search box, the close button. The chrome
      used to carry five different radii (4, 5, 8, 12, 14, 16), which no
@@ -96,7 +106,10 @@
      --corner-radius and the window keeps its own; both stay config-driven,
      because those are the two the cartridge owner has an opinion about. */
   --control-radius: 8px;
-  --shadow: 0 0 24px 0 #3d1f37;
+  /* Kept as two lengths rather than one composed box-shadow so --cover-scale
+     can multiply them. app.js derives both from shadow_size / shadow_fade. */
+  --shadow-blur: 24px;
+  --shadow-spread: 0px;
   --overlay-color: rgba(0, 0, 0, 0.45);
   --loading-ring-color: #925e37;
   --loading-text-color: #a17655;
@@ -110,11 +123,28 @@
   --missing-dim: 0.45;
   --toolbar-color: #a17655;
   --scrollbar-color: #694037;
-  /* The strip across the top of the window that the covers don't get, and the
-     only spacing above them — the vertical budget spends no border margin at
-     the top. Set in Rust (constants::TOOLBAR_BAND), which has already reserved
-     it in the window height; this is the page's copy of that same number. */
-  --toolbar-band: 56px;
+  /* The toolbar and the name line take no height from the covers: each sits
+     inside a margin the window already had. These are their own sizes, not a
+     share of --border-gap, which is what keeps the cover row exactly one
+     border gap from every edge however the gap is set.
+
+     The toolbar is as tall as its tallest control (#close-btn) and holds the
+     window's corners rather than the covers' margin, so the X stays hard right
+     and the order control hard left at any --border-gap. */
+  --toolbar-height: 30px;
+  --toolbar-inset: 16px;
+  /* How far outside the stage a cover is allowed to draw. The stage is exactly
+     the covers' box, so the shadow and the selected cover's lift both fall
+     outside it — and the row's viewport has to clip (overflow-x: auto forces
+     the other axis to clip with it), which sheared the shadow flat against the
+     cover's edge. app.js sets this from shadow_size; the literal is the default
+     shadow plus the 6px lift. */
+  --cover-room: 32px;
+  /* Two whole type units plus the leading they need. The name line is the one
+     piece of large text in the launcher and always gets both units now — it
+     used to be cut from whatever --border-gap had left over, which meant a
+     tighter cartridge silently lost a size. */
+  --name-band: 28px;
   --loading-text-gap: 12px;
   /* The type grid — every font-size in this file. app.js overwrites it with the
      value that lands on whole device pixels for the display actually in front
@@ -147,16 +177,15 @@ html, body {
   overflow: hidden;
 }
 
-/* Toolbar band along the top, covers filling the rest. The window was sized
-   for exactly this in Rust before the page loaded.
+/* Nothing is in the flow: #stage is placed against the window and everything
+   else is pinned to an edge of it. The window was sized for exactly that in
+   Rust before the page loaded.
 
-   Nothing here draws the window's rounded corners: Windows clips the window
-   to that shape before this page is ever composited (see
+   Nothing here draws the window's rounded corners either: Windows clips the
+   window to that shape before this page is ever composited (see
    window::round_corners), so the page can lay itself out as a plain
    rectangle and simply not know about them. */
 body {
-  display: flex;
-  flex-direction: column;
   /* Departure Mono throughout, and the size every rule below inherits rather
      than restates.
 
@@ -233,11 +262,25 @@ body {
    the row itself: there is nothing to order or search, but the close button
    lives in here now and an empty cartridge still has to be closeable. */
 
+/* Out of the flow and pinned to the window, not to the stage: it is the one
+   thing the border gap does not inset. At a large gap the covers pull far into
+   the middle of the window and the controls stay where a control belongs — the
+   order segments hard left, the close button hard right. */
 #toolbar {
-  flex: 0 0 auto;
-  height: var(--toolbar-band);
+  position: fixed;
+  /* Centred in the top margin: the same air above it as between it and the
+     covers. Flush against the window edge it read as something the window had
+     been cropped through rather than as a bar sitting in the margin. */
+  top: calc((var(--border-gap) - var(--toolbar-height)) / 2);
+  left: 0;
+  right: 0;
+  /* Over the stage, under #scrim (2) — a launch dims the bar along with
+     everything else, and #close-btn stays clickable through the scrim because
+     the scrim takes no pointer events. */
+  z-index: 1;
+  height: var(--toolbar-height);
   box-sizing: border-box;
-  padding: 0 var(--border-gap);
+  padding: 0 var(--toolbar-inset);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -419,6 +462,17 @@ body.user-order #arrange {
 
 /* ── The gallery ────────────────────────────────────────────────────── */
 
+/* The box the whole layout is built around: one border gap from every window
+   edge, holding the covers and nothing else. Rust sized the window as
+   `cover + 2 * border_gap` on both axes, so this is exactly the space a cover
+   was measured for. */
+#stage {
+  position: absolute;
+  inset: var(--border-gap);
+  display: flex;
+  flex-direction: column;
+}
+
 /* The scroll viewport. Covers are never shrunk to make a long catalog fit —
    the row simply runs off the side and this scrolls to the rest of it. */
 #gallery {
@@ -427,6 +481,16 @@ body.user-order #arrange {
   display: flex;
   overflow-x: auto;
   overflow-y: hidden;
+  /* The viewport reaches --cover-room outside the stage on every side, and the
+     padding gives that room straight back — so the covers sit exactly where the
+     stage puts them and their shadows have somewhere to be drawn. Without it
+     the shadow is cut off square at the cover's own edge, which reads as a
+     rectangle behind the art rather than as its shadow.
+     One consequence to know: clientWidth is now the stage's width plus this on
+     both sides, so layout.js measures the row against #stage instead. */
+  margin: calc(-1 * var(--cover-room));
+  padding: var(--cover-room);
+  box-sizing: border-box;
   /* The bar under the row is drawn by hand (#scrollbar) so it takes no height
      from the covers — the window was sized for the covers alone, and an
      engine-drawn scrollbar appearing would eat into them. */
@@ -439,21 +503,24 @@ body.user-order #arrange {
 
 /* A row of covers. Auto side margins centre it while it fits and still scroll
    from the true start when it doesn't — `justify-content: center` would put
-   the overflow beyond reach off the left edge. The border gap is padding
-   here rather than on the viewport so it survives scrolling to the end.
+   the overflow beyond reach off the left edge.
 
-   Vertically it is pinned to the TOP of the viewport (`margin-top: 0`, the
-   slack pushed to the bottom by `margin-bottom: auto`) rather than centred.
-   The spacing above the covers is the toolbar band's job and is already spent;
-   the leftover is one border gap at the bottom, and it belongs there whole
-   because that is where the name line and the scrollbar live. Centring would
-   split it in half and leave neither end with enough. */
+   No side padding of its own any more: the stage carries the border gap on
+   every side, and padding here as well would spend it twice. */
 #grid {
   display: inline-flex;
   gap: var(--image-gap);
   align-items: center;
   margin: 0 auto auto;
-  padding: 0 var(--border-gap);
+}
+
+/* Once the row is longer than the stage, the auto margins above have negative
+   free space to divide and split the overflow across BOTH ends — which puts the
+   start of the row to the left of scrollLeft: 0, where nothing can reach it.
+   Pinned to the start instead, so scrolling covers the whole row. */
+body.scrollable #grid {
+  margin-left: 0;
+  margin-right: 0;
 }
 
 /* Drawn rather than left to the engine, so it costs the covers no height and
@@ -497,39 +564,40 @@ body.scrollable #scrollbar {
 }
 
 /* ── The name line ──────────────────────────────────────────────────
-   One line, in the gap under the row, naming the selected cover. Not a label
-   per card: thirty names under thirty covers is noise, and only the one being
-   pointed at is worth reading. Absolutely positioned so a card's height stays
-   exactly its image's height and the sizing contract with Rust is untouched.
+   One line, in the bottom margin, naming the selected cover. Not a label per
+   card: thirty names under thirty covers is noise, and only the one being
+   pointed at is worth reading. Pinned to the window rather than placed in the
+   stage, so it takes no height from the covers and the row stays the same
+   distance from the bottom edge as from the top.
 
-   The only text in the launcher that is not exactly one --type-unit, and the
-   reason --nameplate-size exists. Everything else in the chrome is a label at
+   The only text in the launcher that is not exactly one --type-unit — it is two
+   of them, always. Everything else in the chrome is a label at
    the grid's base size; this is the shelf's name plate, the one piece of large
    low-frequency text in the product, and with the chrome gone monochrome so
    cover art can be the only colour on screen, the one place any personality is
    left to live.
 
-   It still cannot leave the grid: sizeNameplate in app.js gives it one whole
-   unit or two, chosen from the gap actually available, so a cartridge with a
-   tighter border_gap gets the smaller step rather than a clipped line. It used
-   to interpolate freely across that range, which under a pixel face meant a
-   continuum of blurry with two sharp points in it. */
+   It still cannot leave the grid: two whole units, never anything between.
+   Under a pixel face there is nothing between 11 and 22px that is not blurry,
+   so this steps rather than scales. It used to take its size from whatever
+   --border-gap had left over, which meant a tighter cartridge silently dropped
+   to one unit; the band is its own size now and both units are always there. */
 #nameplate {
   position: fixed;
   /* Shrink-wrapped, not full width: placeNameplate() centres it on the cover
      it names, and it can only do that arithmetic if offsetWidth is the width
      of the text rather than the width of the window. `left` is set from JS. */
   left: 0;
-  /* The bottom gap is shared with #scrollbar, which hugs the window edge at
-     6px. These two numbers are what is left over: clear of the bar below and
-     of the covers above, with the whole of the rest given to the name. */
-  bottom: 13px;
+  /* Clear of #scrollbar, which hugs the window edge at 6px and is 4px tall.
+     Band and offset together are the fixed 42px the bottom margin spends; what
+     is left over is the air between the covers and the name. */
+  bottom: 14px;
   max-width: calc(100% - var(--border-gap) * 2);
-  height: calc(var(--border-gap) - 17px);
+  height: var(--name-band);
   display: none;
   align-items: center;
   justify-content: center;
-  font-size: var(--nameplate-size, 11px);
+  font-size: calc(var(--type-unit) * 2);
   letter-spacing: 0;
   line-height: 1;
   color: var(--text);
@@ -576,7 +644,7 @@ body.empty #empty {
   height: var(--plate-height, 240px);
   box-sizing: border-box;
   border: 1px dashed var(--line);
-  border-radius: var(--corner-radius);
+  border-radius: calc(var(--corner-radius) * var(--cover-scale));
 }
 
 #empty-message {
@@ -596,7 +664,6 @@ body.empty #empty {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
   cursor: pointer;
   font-family: inherit;
   transition: transform 0.15s cubic-bezier(0.23, 1, 0.32, 1), opacity 0.25s ease;
@@ -658,7 +725,7 @@ body:not(.launching) .card.selected:not(:disabled) {
   content: "";
   position: absolute;
   inset: 0;
-  border-radius: var(--corner-radius);
+  border-radius: calc(var(--corner-radius) * var(--cover-scale));
   background: var(--primary);
   opacity: var(--veil, 0.28);
   transition: opacity 0.15s ease-out;
@@ -676,53 +743,64 @@ body.launching .card.chosen .cover::after {
   opacity: 0;
 }
 
-/* The sign and the grip are children of .cover, and a generated ::after
-   paints above its siblings — without this the veil would dim the very marks
-   drawn to be read over the art. */
-.sign,
+/* The mark and the grip are children of .cover, and a generated ::after paints
+   above its siblings — without this the veil would dim the very marks drawn to
+   be read over the art. */
+.mark,
 .grip {
   z-index: 1;
 }
 
+/* Radius and shadow are both drawn for a cover at native size and multiplied
+   by --cover-scale, so a cover shrunk for the screen keeps the proportions it
+   was drawn with rather than gaining a radius and a blur 2x too heavy. */
 .card img {
   display: block;
-  border-radius: var(--corner-radius);
+  border-radius: calc(var(--corner-radius) * var(--cover-scale));
   background: var(--plate);
-  box-shadow: var(--shadow);
+  box-shadow: 0 0 calc(var(--shadow-blur) * var(--cover-scale))
+              calc(var(--shadow-spread) * var(--cover-scale))
+              var(--secondary);
 }
 
-/* Why a cover can't be played, or didn't start. Hidden until there is
-   something to say, and independent of the show_captions setting.
-   Positioned out of the flow, in the border gap under the cover: a note on
-   one card must not make that card taller and knock its cover out of line
-   with the others. */
-.card .note {
+/* Why a cover can't be played, or didn't start: the sign and the message as
+   one stack in the middle of the art. Hidden until there is something to say,
+   and independent of the show_captions setting.
+
+   The message used to hang below the cover. Three separate things sheared it
+   there — the row's own `overflow-y: hidden`, its 30px cap, and a 15px line box
+   tighter than the face's own metrics — and it landed on top of the name line,
+   which the page had to hide to compensate. On the art it is clear of all
+   four. */
+.mark {
   display: none;
   position: absolute;
-  /* Clear of the cover AND of the failure outline, which `outline-offset`
-     already pushes 3px past it — at the 4px this used to be, the message sat
-     on the line it was explaining. */
-  top: calc(100% + 10px);
   left: 0;
   right: 0;
-  /* Wraps to a second line rather than ellipsising: the message is the whole
-     point of the state, and a cover is only ~260px wide. Two lines is what
-     the border gap under the cover has room for. */
-  /* Whole pixels, both of them: a fractional line box puts the second line's
-     baseline on a half pixel and undoes the grid for the text that most needs
-     to be read. */
+  top: 50%;
+  transform: translateY(-50%);
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 0 8px;
+  box-sizing: border-box;
+}
+
+.card.unavailable .mark,
+.card.failed .mark {
+  display: flex;
+}
+
+.card .note {
+  /* Wraps rather than ellipsising: the message is the whole point of the
+     state. Whole pixels for the line box — a fractional one puts the second
+     line's baseline on a half pixel and undoes the grid for the text that most
+     needs to be read. */
   line-height: 15px;
-  max-height: 30px;
   color: var(--error-text-color);
   font-size: var(--type-unit);
   letter-spacing: 0;
   text-align: center;
-  overflow: hidden;
-}
-
-.card.unavailable .note,
-.card.failed .note {
-  display: block;
 }
 
 /* ── A game whose exe isn't on the cartridge ────────────────────────── */
@@ -735,19 +813,16 @@ body.launching .card.chosen .cover::after {
   opacity: calc(1 - var(--missing-dim));
 }
 
-/* Circle with a diagonal bar through it, drawn over the middle of the
-   cover. Sized as a fraction of the cover so it scales with it — smaller
-   than it was, now that the veil under it carries most of the message and
-   the sign only has to confirm it. */
+/* Circle with a diagonal bar through it, above the message it belongs to.
+   Sized as a fraction of the cover so it scales with it — .mark spans the full
+   cover width, so the percentage still resolves against the art. Relative
+   rather than static because ::after below is positioned against it. */
 .sign {
   display: none;
-  position: absolute;
-  left: 50%;
-  top: 50%;
+  position: relative;
   box-sizing: border-box;
   width: 26%;
   aspect-ratio: 1;
-  transform: translate(-50%, -50%);
   border: var(--sign-stroke) solid var(--missing-sign-color);
   border-radius: 50%;
 }
@@ -782,8 +857,10 @@ body.launching .card.chosen .cover::after {
 
 .card.no-cover .cover {
   background: var(--plate);
-  border-radius: var(--corner-radius);
-  box-shadow: var(--shadow);
+  border-radius: calc(var(--corner-radius) * var(--cover-scale));
+  box-shadow: 0 0 calc(var(--shadow-blur) * var(--cover-scale))
+              calc(var(--shadow-spread) * var(--cover-scale))
+              var(--secondary);
 }
 
 /* ── A game that was chosen but failed to start ─────────────────────── */
@@ -793,7 +870,7 @@ body.launching .card.chosen .cover::after {
 .card.failed .cover {
   outline: var(--error-border-width) solid var(--error-border-color);
   outline-offset: 3px;
-  border-radius: var(--corner-radius);
+  border-radius: calc(var(--corner-radius) * var(--cover-scale));
 }
 
 /* ── Arranging the row by hand ──────────────────────────────────────── */

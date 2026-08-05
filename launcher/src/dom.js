@@ -15,11 +15,13 @@ const byId = (id) => document.getElementById(id);
 
 export const grid = byId("grid");
 export const gallery = byId("gallery");
+export const stage = byId("stage");
 export const toolbar_left = byId("toolbar-left");
 export const mode_group = byId("mode");
 export const arrange_btn = byId("arrange");
 export const search_box = byId("search");
 export const nameplate = byId("nameplate");
+export const empty_plates = byId("empty-plates");
 export const scrollbar = byId("scrollbar");
 export const thumb = byId("scrollbar-thumb");
 // Not named `status`: that would shadow window.status.
