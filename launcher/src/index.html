@@ -52,6 +52,11 @@
     </div>
   </div>
 
+  <!-- The moving background, behind everything. Empty here: the canvas is made
+       and appended by backdrop.js, so a cartridge set to "simple" gets no
+       canvas, no sprites and no animation loop at all. -->
+  <div id="backdrop" aria-hidden="true"></div>
+
   <!-- The one box the layout is built around: the cover row, one border gap
        from every window edge. Everything else that is drawn — the toolbar
        above, the name line and the scroll bar below — sits inside those margins

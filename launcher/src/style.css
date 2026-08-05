@@ -205,6 +205,58 @@ body {
   font-synthesis: none;
 }
 
+/* One ring for the whole window, in place of the arrow and of the hand and the
+   closed fist the rules below used to name.
+
+   `body *` and not inheritance alone: the engine's own stylesheet sets a cursor
+   on every form control, which beats an inherited value, so a rule on body
+   reaches the field behind the covers and stops at the first button. The
+   keyword fallback is required for the declaration to parse at all. */
+body,
+body * {
+  cursor: var(--cursor), auto;
+}
+
+/* ── The moving background ──────────────────────────────────────────────
+   Behind everything and in front of nothing. The canvas inside is appended by
+   backdrop.js and exists only when background_effect names an effect, so a
+   cartridge on "simple" has an empty div here and nothing else. body keeps its
+   own --primary fill either way, which is what makes the first painted frame
+   the right colour whether a canvas ever arrives or not. */
+
+#backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+#backdrop canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Takes the edge off the field across the middle band, where the covers sit
+   and where a launching cover flies to — the particles are born there, so it
+   is the busiest part of the window.
+
+   Deliberately not opaque. The covers thin out to let the field through, and a
+   solid mask behind them would put back exactly what they were thinned to
+   reveal. */
+#backdrop::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(var(--primary-rgb), 0.55) 30%,
+    rgba(var(--primary-rgb), 0.55) 70%,
+    transparent 100%
+  );
+}
+
 /* The last item in the toolbar row, not pinned to the window corner. Being in
    the row is what lets #search sit next to it without a margin hack, and it is
    the only element that stays put when the rest of the bar fades for a launch —
@@ -233,7 +285,6 @@ body {
      grid, which is the constraint that actually matters. */
   font-size: calc(var(--type-unit) * 2);
   line-height: 1;
-  cursor: pointer;
   transition: filter 0.12s ease-out;
 }
 
@@ -363,7 +414,6 @@ body {
   color: inherit;
   font: inherit;
   white-space: nowrap;
-  cursor: pointer;
   transition: color 0.18s ease, opacity 0.18s ease;
 }
 
@@ -395,7 +445,6 @@ body {
   border-radius: var(--control-radius);
   background: transparent;
   color: inherit;
-  cursor: pointer;
   align-items: center;
   justify-content: center;
 }
@@ -436,6 +485,9 @@ body.user-order #arrange {
   background: transparent;
   color: inherit;
   font: inherit;
+  /* The one place the ring costs something: over a text field it hides where
+     the caret would land. */
+  cursor: text;
 }
 
 #search:focus-visible {
@@ -453,7 +505,9 @@ body.user-order #arrange {
    the black glyph is already right and inverting it would be the smudge. */
 #search::-webkit-search-cancel-button {
   opacity: 0.7;
-  cursor: pointer;
+  /* A pseudo-element, so it takes the field's text cursor rather than the rule
+     on `body *`, and it is a button. */
+  cursor: var(--cursor), auto;
 }
 
 :root[data-ink="light"] #search::-webkit-search-cancel-button {
@@ -556,11 +610,11 @@ body.scrollable #scrollbar {
   height: 100%;
   border-radius: 2px;
   background: var(--scrollbar-color);
-  cursor: grab;
 }
 
+/* The filled ring is what says "held", now that there is no closed hand. */
 #scrollbar-thumb:active {
-  cursor: grabbing;
+  cursor: var(--cursor-drag), auto;
 }
 
 /* ── The name line ──────────────────────────────────────────────────
@@ -664,7 +718,6 @@ body.empty #empty {
   display: flex;
   flex-direction: column;
   align-items: center;
-  cursor: pointer;
   font-family: inherit;
   transition: transform 0.15s cubic-bezier(0.23, 1, 0.32, 1), opacity 0.25s ease;
 }
@@ -688,10 +741,6 @@ body:not(.launching) .card.selected:not(:disabled) {
   border-radius: 16px;
 }
 
-.card:disabled {
-  cursor: default;
-}
-
 /* Filtered out by the search box. `display` rather than `visibility` so the
    row closes up around it. */
 .card.hidden {
@@ -707,40 +756,65 @@ body:not(.launching) .card.selected:not(:disabled) {
   transition: transform 0.12s ease-out;
 }
 
-/* ── The veil ────────────────────────────────────────────────────────
-   Covers that aren't the selected one recede behind a sheet of the page's
-   own background. Two reasons it is this and not `filter: brightness()`:
+/* ── The recede ──────────────────────────────────────────────────────
+   Covers that aren't the one being pointed at thin out, so the moving
+   background shows through them.
+
+   This used to be a sheet of --primary painted over the art at 0.28. Two
+   things changed. A sheet sits ON TOP of the field and hid the very thing the
+   thinning is now there to reveal — and 0.28 turned out to be a curtain over
+   the artwork once it was no longer needed to mark the selection, which the
+   cover's own lift and the name line were already doing. cover_opacity is a
+   plain opacity — 1 is solid — and defaults near the top of its range.
+
+   Still not `filter: brightness()`, for both of the reasons it never was:
 
    1. The webview runs with --disable-gpu (ui.rs). A filter over a full-size
       image is re-rendered in software on every frame of a transition; an
-      opacity fade on a solid overlay is one composited layer.
-   2. It tints toward the background rather than toward black, so it reads
-      the same on a pale cartridge as a dark one. Brightness could only ever
-      dim, which on a light background is the wrong direction entirely.
+      opacity fade is one composited layer.
+   2. A thinned cover blends toward whatever is behind it rather than toward
+      black, so it reads the same on a pale cartridge as a dark one.
+      Brightness could only ever dim.
 
-   The default veil is 0.28. The dimmer figure a missing game gets comes from
-   missing_dim, which is expressed the other way round (1 = untouched), hence
-   the subtraction. */
+   On the <img> rather than on .cover, which is what keeps a failed cover's
+   message solid: the mark and the grip are siblings of the image inside the
+   cover, not children of it. The shadow is on the image too, so it thins along
+   with the art — which is right, a receding cover should not keep a
+   full-strength shadow. */
+.card:not(.unavailable) img {
+  opacity: var(--cover-opacity, 0.9);
+  transition: opacity 0.15s ease-out;
+}
+
+.card.selected:not(.unavailable) img {
+  opacity: 1;
+}
+
+/* The cover being launched is solid whether or not it happened to be the
+   selected one — it is the only thing on screen and is about to be presented
+   in the middle of it. */
+body.launching .card.chosen img {
+  opacity: 1;
+}
+
+/* ── The veil, for a game that isn't there ───────────────────────────
+   The same sheet of the page's own background, kept for the one state that
+   still wants it. A missing game should not be a window onto the moving
+   background: the field showing through a cover reads as an invitation, and
+   that is the one thing an absent game is not.
+
+   Clear by default — every other cover recedes by thinning instead. The figure
+   below comes from missing_dim, which is expressed the other way round
+   (1 = untouched), hence the subtraction. */
 .cover::after {
   content: "";
   position: absolute;
   inset: 0;
   border-radius: calc(var(--corner-radius) * var(--cover-scale));
   background: var(--primary);
-  opacity: var(--veil, 0.28);
+  opacity: 0;
   transition: opacity 0.15s ease-out;
   pointer-events: none;
-}
-
-.card.selected .cover::after {
-  opacity: 0;
-}
-
-/* The cover being launched is clear of the veil whether or not it happened to
-   be the selected one — it is the only thing on screen and is about to be
-   presented in the middle of it. */
-body.launching .card.chosen .cover::after {
-  opacity: 0;
 }
 
 /* The mark and the grip are children of .cover, and a generated ::after paints
@@ -904,10 +978,6 @@ body.arranging .grip {
   display: block;
 }
 
-body.arranging .card {
-  cursor: grab;
-}
-
 /* The lift on hover says "this one starts", which is the one thing a press
    doesn't do while arranging. */
 body.arranging .card:not(:disabled):hover,
@@ -919,7 +989,7 @@ body.arranging .card:not(:disabled):focus-visible {
   /* Under the pointer, not chasing it. */
   transition: none;
   z-index: 5;
-  cursor: grabbing;
+  cursor: var(--cursor-drag), auto;
 }
 
 /* Picked up, so it sits slightly proud of the row. A transform rather than
@@ -1103,6 +1173,7 @@ body.finishing .card.chosen {
   .card,
   .cover,
   .cover::after,
+  .card img,
   .card.pinned,
   #mode-pill,
   #mode button,

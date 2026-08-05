@@ -20,7 +20,6 @@ export const imgs = games.map((game, index) => {
 
   img.src = game.image;
   img.alt = game.name;
-  card.title = game.name;
 
   // Rust checked at startup, so a game whose exe is absent is settled before
   // the player touches anything rather than discovered by a click that does
@@ -29,7 +28,6 @@ export const imgs = games.map((game, index) => {
   if (game.available === false) {
     card.classList.add("unavailable");
     card.disabled = true;
-    card.title = game.name + " — missing " + game.exe;
     note.textContent = "Game files missing";
   } else {
     card.addEventListener("pointerenter", () => select(index));

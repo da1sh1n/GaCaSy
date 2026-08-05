@@ -348,6 +348,10 @@ fn init_script(base_dir: &Path, config: &Config, games: &[catalog::Game]) -> Str
         "loadingTextGap": config.loading_text_gap,
         "toolbarColor": config.toolbar_color,
         "scrollbarColor": config.scrollbar_color,
+        "cursorColor": config.cursor_color,
+        "backgroundEffect": config.background_effect,
+        "backgroundEffectColor": config.background_effect_color,
+        "coverOpacity": config.cover_opacity,
         // Not a config.toml knob, sent along with the look-and-feel so the page
         // reads one object. Milliseconds, because that is what the page's timers
         // take.

@@ -11,6 +11,10 @@ import { layout } from "./layout.js";
 import { order, applyStoredMode, sizeSegments, syncSearchVisibility } from "./row.js";
 import { isLaunching } from "./launch.js";
 import "./arrange.js";
+import "./cursor.js";
+// Last, and for its side effect only: it reads the palette back out of the
+// variables theme.js set, so it has to run after them.
+import "./backdrop.js";
 
 // Fitting the row settles whether the search box is worth offering and how wide
 // the order segments have to be, so the three always move together.

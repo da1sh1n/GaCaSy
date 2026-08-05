@@ -60,6 +60,12 @@ pub struct Config {
     pub loading_text_gap: f64,
     pub toolbar_color: String,
     pub scrollbar_color: String,
+    pub cursor_color: String,
+    /// One of [`crate::constants::BACKGROUND_EFFECTS`], and the color the
+    /// effect is built out of — blank meaning "work it out from the palette".
+    pub background_effect: String,
+    pub background_effect_color: String,
+    pub cover_opacity: f64,
     pub show_console_window: bool,
     // The order the covers are shown in. Unlike everything above, these three
     // are written back by the launcher as well as read — see `store` and
@@ -94,6 +100,10 @@ impl Default for Config {
             loading_text_gap: DEFAULT_LOADING_TEXT_GAP,
             toolbar_color: DEFAULT_TOOLBAR_COLOR.to_string(),
             scrollbar_color: DEFAULT_SCROLLBAR_COLOR.to_string(),
+            cursor_color: DEFAULT_CURSOR_COLOR.to_string(),
+            background_effect: DEFAULT_BACKGROUND_EFFECT.to_string(),
+            background_effect_color: DEFAULT_BACKGROUND_EFFECT_COLOR.to_string(),
+            cover_opacity: DEFAULT_COVER_OPACITY,
             // Off by default: a console game's window is ugly but harmless, and
             // hiding it is one fewer thing standing between "chose a cover" and
             // "game's on screen".
@@ -169,6 +179,13 @@ pub fn load(base_dir: &Path) -> Config {
     set_f64(&mut config.loading_text_gap, table.get("loading_text_gap"));
     set_color(&mut config.toolbar_color, table.get("toolbar_color"));
     set_color(&mut config.scrollbar_color, table.get("scrollbar_color"));
+    set_color(&mut config.cursor_color, table.get("cursor_color"));
+    set_effect(&mut config.background_effect, table.get("background_effect"));
+    set_color(
+        &mut config.background_effect_color,
+        table.get("background_effect_color"),
+    );
+    set_unit(&mut config.cover_opacity, table.get("cover_opacity"));
     if let Some(value) = table.get("show_console_window").and_then(|v| v.as_bool()) {
         config.show_console_window = value;
     }
@@ -199,6 +216,28 @@ fn set_color(slot: &mut String, value: Option<&toml::Value>) {
     if let Some(color) = value.and_then(|v| v.as_str()) {
         if !color.trim().is_empty() {
             *slot = color.trim().to_string();
+        }
+    }
+}
+
+/// A proportion, where 1 means "untouched". [`set_f64`] with the top end closed
+/// as well: a value above 1 is clamped rather than ignored, because "more solid
+/// than solid" has an obvious intent and dropping it would silently leave the
+/// default instead of honouring it.
+fn set_unit(slot: &mut f64, value: Option<&toml::Value>) {
+    let mut parsed = *slot;
+    set_f64(&mut parsed, value);
+    *slot = parsed.clamp(0.0, 1.0);
+}
+
+/// Overwrites `slot` only if `value` names one of [`BACKGROUND_EFFECTS`]. Same
+/// rule as [`set_mode`] below, and the same reason: a typo costs this one
+/// setting and leaves the flat field, which is the option that changes nothing.
+fn set_effect(slot: &mut String, value: Option<&toml::Value>) {
+    if let Some(name) = value.and_then(|v| v.as_str()) {
+        let name = name.trim();
+        if BACKGROUND_EFFECTS.contains(&name) {
+            *slot = name.to_string();
         }
     }
 }
@@ -415,6 +454,26 @@ fn known_settings() -> Vec<(&'static str, &'static str, String)> {
             "scrollbar_color",
             "The bar under a row too long to fit; blank derives it from secondary_color.",
             format!("\"{DEFAULT_SCROLLBAR_COLOR}\""),
+        ),
+        (
+            "cursor_color",
+            "The ring drawn in place of the mouse pointer; blank picks white or black per cover.",
+            format!("\"{DEFAULT_CURSOR_COLOR}\""),
+        ),
+        (
+            "background_effect",
+            "Movement behind the covers: \"simple\", \"particles\" or \"fog\".",
+            format!("\"{DEFAULT_BACKGROUND_EFFECT}\""),
+        ),
+        (
+            "background_effect_color",
+            "What that movement is made of; blank derives it from the palette.",
+            format!("\"{DEFAULT_BACKGROUND_EFFECT_COLOR}\""),
+        ),
+        (
+            "cover_opacity",
+            "How opaque a cover is while it isn't the one pointed at (1 = solid).",
+            DEFAULT_COVER_OPACITY.to_string(),
         ),
         (
             "show_console_window",

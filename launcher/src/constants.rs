@@ -156,6 +156,43 @@ pub const DEFAULT_LOADING_TEXT_GAP: f64 = 12.0; // hairline's bottom edge to the
 pub const DEFAULT_TOOLBAR_COLOR: &str = "";
 pub const DEFAULT_SCROLLBAR_COLOR: &str = "";
 
+// The ring drawn in place of the system pointer. Blank leaves it to the page,
+// which draws it white or black from the brightness of the art under it; a named
+// color pins it to that instead, on every cover.
+pub const DEFAULT_CURSOR_COLOR: &str = "";
+
+// ── The moving background (backdrop.js) ──────────────────────────────────
+
+/// The three the page knows how to draw. A value outside this list leaves
+/// `background_effect` at its default rather than picking one arbitrarily —
+/// see [`crate::config`], which follows the same rule for `order_mode`.
+pub const BACKGROUND_EFFECTS: [&str; 3] = ["simple", "particles", "fog"];
+
+/// "simple" — a flat field — because it is the option that changes nothing.
+/// A cartridge written before this key existed gets exactly the launcher it
+/// had, and the shipped config.toml is where the effect is actually turned on.
+pub const DEFAULT_BACKGROUND_EFFECT: &str = "simple";
+
+/// Blank derives the four tints from the secondary and the accent, the same
+/// way the toolbar and the scrollbar derive theirs. See the ramp in
+/// src/theme.js for why one color is asked for rather than four.
+pub const DEFAULT_BACKGROUND_EFFECT_COLOR: &str = "";
+
+/// How opaque a cover is while it is not the one being pointed at, so the field
+/// behind shows through it. A plain opacity: 1 is solid, 0 would be invisible.
+///
+/// Named for what it is rather than following [`DEFAULT_MISSING_DIM`] next
+/// door. That one is a dimming factor and reads backwards for this — a value
+/// that goes DOWN as a cover gets more see-through should not be called a dim.
+/// `missing_dim` keeps its own name because cartridges already set it.
+///
+/// Deliberately close to solid. This replaced an opaque veil that sat at 0.28
+/// and did most of the work of saying which cover was selected — but a veil
+/// that heavy is a curtain over the art, and the cover's lift and the name line
+/// say "this one" perfectly well on their own. What is left is just enough for
+/// the field to register as being *behind* the covers rather than beside them.
+pub const DEFAULT_COVER_OPACITY: f64 = 0.9;
+
 // ── Cover order (order.rs, config.rs) ────────────────────────────────────
 
 /// What `order_mode` is when the config doesn't say — see [`crate::order::MODES`]
