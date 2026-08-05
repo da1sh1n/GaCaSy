@@ -1,0 +1,12 @@
+# Keeps test modules out of the knowledge graph only. They stay compiled, stay
+# run by `cargo test`, and stay the security model's proof — this file changes
+# nothing but the graph, where 81 test functions add ~10% of the nodes and bury
+# the modules they exercise.
+#
+# gitignore syntax. Merged after .gitignore, so it can only ever exclude more.
+# Delete this file and re-run /graphify to get them back.
+**/tests.rs
+
+# Crate manifests carry no design information graphify can use — dependency
+# lists and version pins, already covered by `xtask version`.
+Cargo.toml

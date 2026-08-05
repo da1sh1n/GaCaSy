@@ -19,3 +19,8 @@ EBWebView/
 # quietly ask everyone else's build to trust it too. keys/gacasy.pub — the
 # release key — is tracked, and is the only one that should be.
 keys/
+
+# The knowledge graph, rebuilt by `graphify update .`. It carries a cache of the
+# whole tree and two files holding absolute paths from the machine that built
+# it — wrong for anyone else, and a large diff on every rebuild.
+graphify-out/
