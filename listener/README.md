@@ -1,12 +1,12 @@
 <!--
   SPDX-License-Identifier: GPL-3.0-or-later
   Copyright (C) 2026 da1sh1n
-  This file is part of GaCaSy, licensed under the GNU General Public License
-  v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+  This file is part of Romzeta, licensed under the GNU General Public License
+  v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
   or <https://www.gnu.org/licenses/> for details.
 -->
 
-# GaCaSy Listener (PC side)
+# Romzeta Listener (PC side)
 
 The PC-side component that auto-detects a connected cartridge, verifies it, and
 launches the cartridge's launcher.
@@ -81,14 +81,14 @@ not this program's — running it by hand does nothing special.
 | `<exe folder>\listener.log` | the activity log |
 | `<volume>\launcher.exe` | the only file on a cartridge it reads, and the whole test |
 
-Installed, `<exe folder>` is **`%LOCALAPPDATA%\GaCaSy\`** — the exe and its log,
+Installed, `<exe folder>` is **`%LOCALAPPDATA%\Romzeta\`** — the exe and its log,
 one folder, no administrator needed to put them there or to read them back.
 
 The log is worth knowing about: the listener has no console and no visible
 window, so it is the only way to see why a cartridge did or didn't launch.
 Every volume it looks at gets a line, including the ones it ignores and why.
 A copy dropped by hand into a read-only folder falls back to
-`%LOCALAPPDATA%\GaCaSy\listener.log` rather than going silent — the same folder
+`%LOCALAPPDATA%\Romzeta\listener.log` rather than going silent — the same folder
 an install uses, so there is one place to look either way.
 
 ## Trust
@@ -106,7 +106,7 @@ Three things follow, and they are the point of the design:
   launcher's version comes out of its signature too.
 - **The trust anchor is compiled in.** Changing what a listener accepts means
   replacing the listener. See [`build.rs`](build.rs), which bakes in `keys/*.pub`.
-- **The signature declares a role.** All three GaCaSy programs are signed with the
+- **The signature declares a role.** All three Romzeta programs are signed with the
   same key, so "signed by us" is not the same question as "is a launcher" — a
   genuine `installer.exe` renamed to `launcher.exe` is refused.
 

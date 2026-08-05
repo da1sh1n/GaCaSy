@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! Stopping Windows from opening a folder when a cartridge is plugged in.
@@ -10,7 +10,7 @@
 //! `WM_DEVICECHANGE` and starts the launcher, and **AutoPlay** does whatever the
 //! user last told it to do with removable drives. On most PCs that is "Open
 //! folder to view files", so an Explorer window opens over the launcher a moment
-//! after it appears. Nothing GaCaSy does causes it and nothing GaCaSy does can
+//! after it appears. Nothing Romzeta does causes it and nothing Romzeta does can
 //! out-race it; the setting itself has to change.
 //!
 //! ## What this changes, exactly
@@ -61,7 +61,7 @@ const TAKE_NO_ACTION: &str = "MSTakeNoAction";
 /// back — a setting silently changed and never restored is the kind of thing
 /// people find years later and cannot explain.
 #[cfg(windows)]
-const BACKUP_KEY: &str = r"Software\GaCaSy\AutoPlay";
+const BACKUP_KEY: &str = r"Software\Romzeta\AutoPlay";
 
 #[cfg(windows)]
 const BACKUP_CHOSEN: &str = "PreviousChosen";

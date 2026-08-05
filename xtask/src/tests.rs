@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! Every test in this crate, one submodule per source module.
@@ -31,7 +31,7 @@ impl Scratch {
         static COUNTER: AtomicU32 = AtomicU32::new(0);
         let unique = COUNTER.fetch_add(1, Ordering::Relaxed);
         let dir =
-            std::env::temp_dir().join(format!("gacasy-{name}-{}-{unique}", std::process::id()));
+            std::env::temp_dir().join(format!("romzeta-{name}-{}-{unique}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("temp dir");
         Scratch(dir)
@@ -87,12 +87,12 @@ mod keys {
         let env = env_from(
             "# a comment\n\
              \n\
-             GACASY_SIGNING_KEY=C:\\keys\\gacasy.key\n\
-             GACASY_SIGNING_PASSWORD = \"hunter2\"\n\
+             ROMZETA_SIGNING_KEY=C:\\keys\\romzeta.key\n\
+             ROMZETA_SIGNING_PASSWORD = \"hunter2\"\n\
              QUOTED='single'\n",
         );
-        assert_eq!(env["GACASY_SIGNING_KEY"], "C:\\keys\\gacasy.key");
-        assert_eq!(env["GACASY_SIGNING_PASSWORD"], "hunter2");
+        assert_eq!(env["ROMZETA_SIGNING_KEY"], "C:\\keys\\romzeta.key");
+        assert_eq!(env["ROMZETA_SIGNING_PASSWORD"], "hunter2");
         assert_eq!(env["QUOTED"], "single");
         assert_eq!(env.len(), 3);
     }
@@ -108,7 +108,7 @@ mod keys {
         let root = Scratch::new(&format!("xtask-{case}"));
         fs::write(
             root.join(".env"),
-            format!("GACASY_SIGNING_KEY={}\n{extra}", key.display()),
+            format!("ROMZETA_SIGNING_KEY={}\n{extra}", key.display()),
         )
         .expect("write .env");
         root
@@ -121,7 +121,7 @@ mod keys {
         // a key with no KDF. Routing the default key through it turned "needs
         // nothing" into a prompt claiming the key was password-protected.
         let dir = Scratch::new("xtask-plainkey");
-        let key_path = dir.join("gacasy.key");
+        let key_path = dir.join("romzeta.key");
 
         let pair = minisign::KeyPair::generate_unencrypted_keypair().expect("keypair");
         fs::write(&key_path, pair.sk.to_box(None).expect("box").to_string()).expect("write key");
@@ -137,12 +137,12 @@ mod keys {
         // untrusted *comment*, not a password. Passing the password there put
         // it in cleartext on the line directly above the key it protects.
         let dir = Scratch::new("xtask-encryptedkey");
-        let key_path = dir.join("gacasy.key");
+        let key_path = dir.join("romzeta.key");
 
         let root = rooted_at(
             "encryptedkey-root",
             &key_path,
-            "GACASY_SIGNING_PASSWORD=correct-horse-battery-staple\n",
+            "ROMZETA_SIGNING_PASSWORD=correct-horse-battery-staple\n",
         );
         keygen(root.path(), false).unwrap_or_else(|e| panic!("{e}"));
 
@@ -162,11 +162,11 @@ mod keys {
         let root = Scratch::new("xtask-repo");
         fs::create_dir_all(root.join("keys")).expect("temp repo");
 
-        let inside = root.join("keys").join("gacasy.key");
+        let inside = root.join("keys").join("romzeta.key");
         assert!(refuse_inside_repo(root.path(), &inside).is_err());
 
         let elsewhere = Scratch::new("xtask-elsewhere");
-        let outside = elsewhere.join("gacasy.key");
+        let outside = elsewhere.join("romzeta.key");
         assert!(refuse_inside_repo(root.path(), &outside).is_ok());
     }
 }
@@ -231,14 +231,14 @@ mod sign {
         let exe = dir.join("fake.exe");
         fs::write(&exe, b"MZ pretend this is a launcher").expect("write");
 
-        sign(&exe, &key, "gacasy-launcher 0.2.0").expect("sign");
+        sign(&exe, &key, "romzeta-launcher 0.2.0").expect("sign");
         let verified = verify(&exe, &anchors).unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(verified.anchor, "dev");
-        assert!(verified.comment.starts_with("gacasy-launcher 0.2.0 "));
+        assert!(verified.comment.starts_with("romzeta-launcher 0.2.0 "));
 
         // Signing twice must replace, not nest — and must still verify.
         let once = fs::metadata(&exe).expect("stat").len();
-        sign(&exe, &key, "gacasy-launcher 0.2.1").expect("re-sign");
+        sign(&exe, &key, "romzeta-launcher 0.2.1").expect("re-sign");
         assert!(fs::metadata(&exe).expect("stat").len() <= once + 8);
         assert!(verify(&exe, &anchors).is_ok());
 
@@ -266,13 +266,13 @@ mod sign {
         let ours = minisign::KeyPair::generate_unencrypted_keypair().expect("keypair");
         let theirs = minisign::KeyPair::generate_unencrypted_keypair().expect("keypair");
         let anchors = vec![Anchor {
-            name: "gacasy",
+            name: "romzeta",
             base64: base64_line(&ours.pk.to_box().expect("pk").to_string()).expect("base64 line"),
         }];
 
         let exe = dir.join("theirs.exe");
         fs::write(&exe, b"MZ signed by someone else").expect("write");
-        sign(&exe, &theirs.sk, "gacasy-launcher 0.2.0").expect("sign");
+        sign(&exe, &theirs.sk, "romzeta-launcher 0.2.0").expect("sign");
 
         let error = verify(&exe, &anchors).expect_err("not our key");
         assert!(error.contains("not by any key this tree trusts"), "{error}");

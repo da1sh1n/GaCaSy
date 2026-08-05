@@ -1,6 +1,6 @@
-# GaCaSy Hardware
+# Romzeta Hardware
 
-The cartridge shell. A GaCaSy cartridge is any storage volume with a signed `launcher.exe` at
+The cartridge shell. A Romzeta cartridge is any storage volume with a signed `launcher.exe` at
 its root — the enclosure here is one physical form of that, not a requirement of the format.
 
 ## Files

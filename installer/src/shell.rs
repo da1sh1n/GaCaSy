@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! The window, the GL context and the event loop — everything under the wizard.
@@ -266,8 +266,11 @@ impl Shell {
                 &mut requested,
             );
         }
-        egui.state
-            .handle_platform_output_with_event_loop(window, event_loop, output.platform_output);
+        egui.state.handle_platform_output_with_event_loop(
+            window,
+            event_loop,
+            output.platform_output,
+        );
 
         // Paint. Textures the frame introduced have to be uploaded before it is
         // drawn, and the ones it dropped freed only after.
@@ -360,7 +363,7 @@ struct GlWindow {
 impl GlWindow {
     fn new(event_loop: &ActiveEventLoop) -> GlWindow {
         let attributes = winit::window::WindowAttributes::default()
-            .with_title("GaCaSy Installer")
+            .with_title("Romzeta Installer")
             .with_inner_size(winit::dpi::LogicalSize::new(920.0, 660.0))
             .with_min_inner_size(winit::dpi::LogicalSize::new(760.0, 520.0))
             .with_resizable(true)
@@ -446,10 +449,9 @@ impl GlWindow {
 
     fn resize(&self, size: winit::dpi::PhysicalSize<u32>) {
         // A minimised window reports zero, which is not a surface size.
-        let (Some(width), Some(height)) = (
-            NonZeroU32::new(size.width),
-            NonZeroU32::new(size.height),
-        ) else {
+        let (Some(width), Some(height)) =
+            (NonZeroU32::new(size.width), NonZeroU32::new(size.height))
+        else {
             return;
         };
         self.surface.resize(&self.context, width, height);
@@ -459,5 +461,3 @@ impl GlWindow {
         self.surface.swap_buffers(&self.context)
     }
 }
-
-

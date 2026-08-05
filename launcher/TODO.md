@@ -1,4 +1,4 @@
-# GaCaSy Launcher — TODO
+# Romzeta Launcher — TODO
 
 The launcher carries no secret and verifies nothing. Its signature *is* the cartridge's
 identity, and it is read rather than asked — see

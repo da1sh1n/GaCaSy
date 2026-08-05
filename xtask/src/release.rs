@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! Building a release, in the one order that works.
@@ -43,13 +43,24 @@ pub fn run(root: &Path) -> Result<(), String> {
     let release = root.join("target").join("release");
 
     println!("== building launcher and listener");
-    cargo(root, &["build", "--release", "-p", "launcher", "-p", "listener"])?;
+    cargo(
+        root,
+        &["build", "--release", "-p", "launcher", "-p", "listener"],
+    )?;
 
     println!("== signing them");
     let launcher = release.join(exe("launcher"));
     let listener = release.join(exe("listener"));
-    sign::sign(&launcher, &key, &format!("gacasy-launcher {}", version("launcher")))?;
-    sign::sign(&listener, &key, &format!("gacasy-listener {}", version("listener")))?;
+    sign::sign(
+        &launcher,
+        &key,
+        &format!("romzeta-launcher {}", version("launcher")),
+    )?;
+    sign::sign(
+        &listener,
+        &key,
+        &format!("romzeta-listener {}", version("listener")),
+    )?;
 
     // Deliberately after signing, and deliberately a separate cargo invocation:
     // in one `--workspace` build cargo is free to run the installer's build
@@ -60,7 +71,11 @@ pub fn run(root: &Path) -> Result<(), String> {
 
     println!("== signing the installer");
     let installer = release.join(exe("installer"));
-    sign::sign(&installer, &key, &format!("gacasy-installer {}", version("installer")))?;
+    sign::sign(
+        &installer,
+        &key,
+        &format!("romzeta-installer {}", version("installer")),
+    )?;
 
     println!();
     println!("project version {project_version} — these three are compatible with each other:");

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! The listener's fixed settings, and where its log goes.
@@ -53,7 +53,7 @@ pub fn fallback_log_path() -> PathBuf {
     let base = env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(env::temp_dir);
-    base.join("GaCaSy").join(LOG_FILE)
+    base.join("Romzeta").join(LOG_FILE)
 }
 
 #[cfg(not(windows))]
@@ -62,5 +62,5 @@ pub fn fallback_log_path() -> PathBuf {
         .map(PathBuf::from)
         .or_else(|| env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))
         .unwrap_or_else(env::temp_dir);
-    base.join("gacasy").join(LOG_FILE)
+    base.join("romzeta").join(LOG_FILE)
 }

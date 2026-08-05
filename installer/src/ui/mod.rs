@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! The wizard: a header, one screen, a footer of actions.
@@ -107,7 +107,7 @@ fn header(app: &mut App, ui: &mut egui::Ui) {
 
 fn title(app: &App) -> &'static str {
     match app.screen {
-        Screen::Home => "GaCaSy",
+        Screen::Home => "Romzeta",
         Screen::Volume => "Choose the drive",
         Screen::Games => match app.mode {
             Mode::Create => "Add games",
@@ -145,8 +145,9 @@ fn footer(app: &mut App, ctx: &egui::Context, ui: &mut egui::Ui) {
             app.screen = back;
         }
 
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            match app.screen {
+        ui.with_layout(
+            egui::Layout::right_to_left(egui::Align::Center),
+            |ui| match app.screen {
                 Screen::Volume => {
                     if ui.button("Rescan drives").clicked() {
                         app.refresh_volumes();
@@ -199,8 +200,8 @@ fn footer(app: &mut App, ctx: &egui::Context, ui: &mut egui::Ui) {
                     }
                 }
                 Screen::Home | Screen::Listener => {}
-            }
-        });
+            },
+        );
     });
     ui.add_space(6.0);
 }

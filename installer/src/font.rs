@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! The wizard draws in the operating system's own UI font.
@@ -56,7 +56,9 @@ pub fn definitions() -> FontDefinitions {
     // epaint panics the first time a family with no fonts behind it is used, and
     // it does that lazily, so an empty Monospace is a crash waiting for whichever
     // egui internal reaches for one.
-    fonts.families.insert(FontFamily::Proportional, chain.clone());
+    fonts
+        .families
+        .insert(FontFamily::Proportional, chain.clone());
     fonts.families.insert(FontFamily::Monospace, chain);
     fonts
 }
@@ -138,7 +140,11 @@ fn face_file(face: &str) -> Option<PathBuf> {
         // The machine list stores a bare filename; a per-user install stores the
         // whole path, because it isn't in the shared folder.
         let path = PathBuf::from(&value);
-        let path = if path.is_absolute() { path } else { dir.join(path) };
+        let path = if path.is_absolute() {
+            path
+        } else {
+            dir.join(path)
+        };
         if path.is_file() {
             return Some(path);
         }
@@ -173,10 +179,7 @@ fn machine_font_dir() -> Option<PathBuf> {
 
 #[cfg(windows)]
 fn user_font_dir() -> Option<PathBuf> {
-    Some(
-        PathBuf::from(std::env::var_os("LOCALAPPDATA")?)
-            .join(r"Microsoft\Windows\Fonts"),
-    )
+    Some(PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join(r"Microsoft\Windows\Fonts"))
 }
 
 /// Whether these bytes are worth handing to epaint.

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! The window, the webview in it, and everything the two say to each other.
@@ -81,8 +81,12 @@ pub fn run(base_dir: &Path) -> wry::Result<()> {
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
 
-    let (window_width, window_height) =
-        window::size(&event_loop, games.len(), config.image_gap, config.border_gap);
+    let (window_width, window_height) = window::size(
+        &event_loop,
+        games.len(),
+        config.image_gap,
+        config.border_gap,
+    );
     let show_console_window = config.show_console_window;
 
     let window = WindowBuilder::new()
@@ -299,7 +303,11 @@ fn background_rgba(color: &str) -> wry::RGBA {
     let hex = color.trim().strip_prefix('#').unwrap_or("");
     let digits: Vec<u8> = match hex.len() {
         // #rgb is shorthand for #rrggbb — each digit doubled, not zero-padded.
-        3 => hex.chars().filter_map(|c| c.to_digit(16)).map(|d| (d * 17) as u8).collect(),
+        3 => hex
+            .chars()
+            .filter_map(|c| c.to_digit(16))
+            .map(|d| (d * 17) as u8)
+            .collect(),
         6 => (0..3)
             .filter_map(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).ok())
             .collect(),

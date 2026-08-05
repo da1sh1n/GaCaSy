@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! Collects the installer's payload — the files it writes onto a cartridge and
@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 /// iteration. The resulting installer is not shippable and knows it: `payload.rs`
 /// reports the empty slots and every screen that would write one refuses to run
 /// — so a payload-less build is loud, not silently useless.
-const OPTIONAL: &str = "GACASY_PAYLOAD_OPTIONAL";
+const OPTIONAL: &str = "ROMZETA_PAYLOAD_OPTIONAL";
 
 /// One file the installer carries.
 struct Item {
@@ -69,7 +69,7 @@ fn main() {
             Item {
                 staged: "launcher.exe.z",
                 size_const: "LAUNCHER_BYTES",
-                env_override: "GACASY_LAUNCHER_EXE",
+                env_override: "ROMZETA_LAUNCHER_EXE",
                 remedy: "cargo build --release -p launcher",
                 role: trust::LAUNCHER_ROLE,
             },
@@ -79,7 +79,7 @@ fn main() {
             Item {
                 staged: "listener.exe.z",
                 size_const: "LISTENER_BYTES",
-                env_override: "GACASY_LISTENER_EXE",
+                env_override: "ROMZETA_LISTENER_EXE",
                 remedy: "cargo build --release -p listener",
                 role: trust::LISTENER_ROLE,
             },
@@ -90,8 +90,14 @@ fn main() {
     // The listener's config.toml used to be here. It has none now — what it
     // trusts is compiled into it, and nothing else in the file was worth a file.
     let seeds = [
-        ("launcher-config.toml", manifest.join("../launcher/src/config.toml")),
-        ("launcher-catalog.json", manifest.join("../launcher/src/catalog.json")),
+        (
+            "launcher-config.toml",
+            manifest.join("../launcher/src/config.toml"),
+        ),
+        (
+            "launcher-catalog.json",
+            manifest.join("../launcher/src/catalog.json"),
+        ),
     ];
 
     let optional = env::var_os(OPTIONAL).is_some_and(|v| !v.is_empty());
@@ -110,9 +116,7 @@ fn main() {
             // Skipped under the escape hatch: that build is for working on the
             // UI, already refuses to install anything, and demanding a signed
             // payload from it would defeat the point of having it.
-            if !optional
-                && let Err(problem) = check_signature(&source, &manifest, item.role)
-            {
+            if !optional && let Err(problem) = check_signature(&source, &manifest, item.role) {
                 missing.push(problem);
             }
             // Signature checked above, against these same bytes, before they are
@@ -142,7 +146,10 @@ fn main() {
         } else {
             // A seed going missing means the repo is broken, not that a build
             // step was skipped, so it is fatal even under the escape hatch.
-            missing.push(format!("{} is missing from the source tree", source.display()));
+            missing.push(format!(
+                "{} is missing from the source tree",
+                source.display()
+            ));
         }
     }
 
@@ -224,18 +231,16 @@ fn check_signature(binary: &Path, manifest: &Path, role: &str) -> Result<(), Str
         return Err(format!(
             "no public key to check {} against — expected {}",
             binary.display(),
-            manifest.join("../keys/gacasy.pub").display()
+            manifest.join("../keys/romzeta.pub").display()
         ));
     }
     let anchors: Vec<trust::Anchor> = anchors
         .iter()
-        .map(|(name, base64)| trust::Anchor {
-            name,
-            base64,
-        })
+        .map(|(name, base64)| trust::Anchor { name, base64 })
         .collect();
 
-    let bytes = fs::read(binary).map_err(|e| format!("{} could not be read: {e}", binary.display()))?;
+    let bytes =
+        fs::read(binary).map_err(|e| format!("{} could not be read: {e}", binary.display()))?;
 
     // The same call the listener will make against the same bytes. That is the
     // point of routing this through `trust` rather than open-coding a verify
@@ -264,7 +269,7 @@ fn check_signature(binary: &Path, manifest: &Path, role: &str) -> Result<(), Str
 
 /// The public keys in `keys/`, read the same way `listener/build.rs` reads them.
 fn trust_anchors(manifest: &Path) -> Vec<(String, String)> {
-    [("release", "gacasy.pub"), ("dev", "dev.pub")]
+    [("release", "romzeta.pub"), ("dev", "dev.pub")]
         .iter()
         .filter_map(|(name, file)| {
             let path = manifest.join("../keys").join(file);
@@ -290,7 +295,7 @@ fn trust_anchors(manifest: &Path) -> Vec<(String, String)> {
 /// user can edit is an anchor an attacker can edit.
 ///
 /// Absent keys are not fatal here the way they are for the listener: a
-/// payload-less UI build (`GACASY_PAYLOAD_OPTIONAL`) has nothing to verify and
+/// payload-less UI build (`ROMZETA_PAYLOAD_OPTIONAL`) has nothing to verify and
 /// already refuses to install anything. An empty list means nothing verifies,
 /// which is the safe direction.
 fn stage_trust_anchors(out_dir: &Path, manifest: &Path) {
@@ -330,8 +335,7 @@ fn squeeze(source: &Path, staged: &Path) -> u64 {
     let bytes = fs::read(source)
         .unwrap_or_else(|e| panic!("failed to read {} for packing: {e}", source.display()));
 
-    let mut encoder =
-        flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
     encoder
         .write_all(&bytes)
         .and_then(|()| encoder.finish())

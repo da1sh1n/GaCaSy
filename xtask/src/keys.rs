@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! Where the signing key lives, and which public keys a build trusts.
@@ -19,7 +19,7 @@
 //!
 //! | File | What it is | Committed |
 //! |---|---|---|
-//! | `keys/gacasy.pub` | the release key | yes — it is public |
+//! | `keys/romzeta.pub` | the release key | yes — it is public |
 //! | `keys/dev.pub` | whatever you generated locally | no |
 //!
 //! A listener trusts both, which is what makes a clone of this repo useful: you
@@ -28,7 +28,7 @@
 //! official cartridge. Nothing about that is configurable at runtime — see
 //! `listener/build.rs`.
 //!
-//! `keygen` writes `dev.pub` and never touches `gacasy.pub`, so cloning, keying
+//! `keygen` writes `dev.pub` and never touches `romzeta.pub`, so cloning, keying
 //! and building leaves no modification to a tracked file to accidentally commit.
 
 use std::collections::HashMap;
@@ -36,14 +36,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Overrides the secret key location. A path, not a key.
-const KEY_VAR: &str = "GACASY_SIGNING_KEY";
+const KEY_VAR: &str = "ROMZETA_SIGNING_KEY";
 /// The password for it. Absent means the key is unencrypted, or that you will
 /// be asked.
-const PASSWORD_VAR: &str = "GACASY_SIGNING_PASSWORD";
+const PASSWORD_VAR: &str = "ROMZETA_SIGNING_PASSWORD";
 
 /// A public key a build trusts, and where it came from.
 pub struct Anchor {
-    /// `gacasy` or `dev` — what `xtask verify` prints so you know which of the
+    /// `romzeta` or `dev` — what `xtask verify` prints so you know which of the
     /// two keys signed the thing in front of you.
     pub name: &'static str,
     /// The bare base64 line, ready for `minisign_verify::PublicKey::from_base64`.
@@ -58,7 +58,7 @@ pub struct Anchor {
 /// failure — so both read these same two files and neither has a list of its
 /// own.
 pub fn anchors(root: &Path) -> Vec<Anchor> {
-    [("gacasy", "gacasy.pub"), ("dev", "dev.pub")]
+    [("romzeta", "romzeta.pub"), ("dev", "dev.pub")]
         .into_iter()
         .filter_map(|(name, file)| {
             let text = fs::read_to_string(root.join("keys").join(file)).ok()?;
@@ -112,7 +112,7 @@ pub fn dotenv(root: &Path) -> HashMap<String, String> {
 
 /// A setting from the real environment, falling back to `.env`.
 ///
-/// That order round: an explicit `GACASY_SIGNING_KEY=… cargo run` should win
+/// That order round: an explicit `ROMZETA_SIGNING_KEY=… cargo run` should win
 /// over a file you set up months ago and forgot.
 fn setting(name: &str, env: &HashMap<String, String>) -> Option<String> {
     std::env::var(name)
@@ -122,8 +122,8 @@ fn setting(name: &str, env: &HashMap<String, String>) -> Option<String> {
         .filter(|value| !value.trim().is_empty())
 }
 
-/// Where the secret key is: `$GACASY_SIGNING_KEY`, then `.env`, then
-/// `~/.gacasy/gacasy.key`.
+/// Where the secret key is: `$ROMZETA_SIGNING_KEY`, then `.env`, then
+/// `~/.romzeta/romzeta.key`.
 pub fn secret_key_path(root: &Path) -> PathBuf {
     setting(KEY_VAR, &dotenv(root))
         .map(PathBuf::from)
@@ -137,7 +137,7 @@ pub fn default_secret_key_path() -> PathBuf {
         .or_else(|| std::env::var_os("HOME"))
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir);
-    home.join(".gacasy").join("gacasy.key")
+    home.join(".romzeta").join("romzeta.key")
 }
 
 /// Loads the secret key, decrypting it only if it is actually encrypted.
@@ -188,9 +188,12 @@ pub fn secret_key(root: &Path) -> Result<minisign::SecretKey, String> {
     }
 
     if let Some(password) = setting(PASSWORD_VAR, &dotenv(root)) {
-        return boxed()?
-            .into_secret_key(Some(password))
-            .map_err(|e| format!("could not decrypt {} — wrong {PASSWORD_VAR}? ({e})", path.display()));
+        return boxed()?.into_secret_key(Some(password)).map_err(|e| {
+            format!(
+                "could not decrypt {} — wrong {PASSWORD_VAR}? ({e})",
+                path.display()
+            )
+        });
     }
 
     eprintln!("{} is password-protected.", path.display());
@@ -208,7 +211,7 @@ pub fn secret_key(root: &Path) -> Result<minisign::SecretKey, String> {
 /// `release` picks which public key file it becomes. The default, `dev.pub`, is
 /// gitignored and is what anyone cloning this repo wants: their listener trusts
 /// their cartridges and nobody else's build changes. `--release` writes
-/// `gacasy.pub`, the committed key every published listener is built against —
+/// `romzeta.pub`, the committed key every published listener is built against —
 /// there should be exactly one of those, ever, so it refuses to overwrite.
 pub fn keygen(root: &Path, release: bool) -> Result<(), String> {
     let secret_path = secret_key_path(root);
@@ -261,7 +264,7 @@ pub fn keygen(root: &Path, release: bool) -> Result<(), String> {
 
     let public_path = root
         .join("keys")
-        .join(if release { "gacasy.pub" } else { "dev.pub" });
+        .join(if release { "romzeta.pub" } else { "dev.pub" });
     if release && public_path.exists() {
         return Err(format!(
             "{} already exists.\n\

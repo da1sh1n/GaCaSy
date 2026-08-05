@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! Every test in this crate, one submodule per source module.
@@ -126,7 +126,7 @@ mod config {
 
     impl Scratch {
         fn new(name: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!("gacasy-launcher-test-{name}"));
+            let dir = std::env::temp_dir().join(format!("romzeta-launcher-test-{name}"));
             let _ = fs::remove_dir_all(&dir);
             fs::create_dir_all(&dir).expect("failed to create the scratch directory");
             Scratch(dir)

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! `--version` and `--signature`, answered before the window opens.
@@ -49,7 +49,7 @@ impl std::fmt::Display for Version {
 
 /// The launcher this installer carries — from `payload::LAUNCHER_VERSION`, which
 /// `build.rs` reads out of `../launcher/Cargo.toml`. `None` only under the
-/// `GACASY_PAYLOAD_OPTIONAL` escape hatch, where there is no real launcher to
+/// `ROMZETA_PAYLOAD_OPTIONAL` escape hatch, where there is no real launcher to
 /// compare against anyway.
 pub fn bundled() -> Option<Version> {
     parse(payload::LAUNCHER_VERSION)
@@ -91,7 +91,7 @@ pub fn handled() -> bool {
         sigblock::cli::print_signature();
     }
     if help {
-        println!("GaCaSy installer {}", env!("CARGO_PKG_VERSION"));
+        println!("Romzeta installer {}", env!("CARGO_PKG_VERSION"));
         println!();
         println!("Run it with no arguments to open the installer.");
         println!("  --version    print x.y.z");

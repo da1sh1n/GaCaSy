@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! Every test in this crate, one submodule per source module.
@@ -49,7 +49,7 @@ impl Scratch {
         static COUNTER: AtomicU32 = AtomicU32::new(0);
         let unique = COUNTER.fetch_add(1, Ordering::Relaxed);
         let dir =
-            std::env::temp_dir().join(format!("gacasy-{name}-{}-{unique}", std::process::id()));
+            std::env::temp_dir().join(format!("romzeta-{name}-{}-{unique}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("temp dir");
         Scratch(dir)
@@ -141,7 +141,7 @@ mod trust {
         let signature = "untrusted comment: signature from a key we do not have\n\
                          RUQAAAAAAAAAAOaGxHqZQ0KtvVCJ6iKzXG8bFvKZ0V0kZ1qWzKz0hVYQ4rZ8Xk1t\
                          Yy0jVQhJZ0kZ1qWzKz0hVYQ4rZ8Xk1tYy0jVQ==\n\
-                         trusted comment: gacasy-launcher 9.9.9\n\
+                         trusted comment: romzeta-launcher 9.9.9\n\
                          AAAA==\n";
         let signed = sigblock::attach(b"MZ signed by someone else", signature);
         fs::write(dir.join(LAUNCHER_NAME), signed).expect("write");
@@ -189,7 +189,7 @@ mod version {
         // guess about what the signature meant, so each is refused. The first is
         // the one that matters now: `parse` is fed the *version field* of a
         // trusted comment, never the whole comment.
-        assert_eq!(parse("gacasy-launcher 0.2.0"), None);
+        assert_eq!(parse("romzeta-launcher 0.2.0"), None);
         assert_eq!(parse("0.2"), None);
         assert_eq!(parse("0.2.0.1"), None);
         assert_eq!(parse("0.2.0-rc1"), None);
@@ -200,7 +200,7 @@ mod version {
 
     #[test]
     fn our_own_version_parses() {
-        // If this fails, `--version` is printing something no other GaCaSy
+        // If this fails, `--version` is printing something no other Romzeta
         // program could read back.
         let own = own();
         assert_eq!(parse(&own.to_string()), Some(own));
@@ -212,7 +212,7 @@ mod version {
         // version. This is the contract between the two crates: if xtask's
         // comment format ever changes, this is what should notice.
         let (role, version) = {
-            let comment = "gacasy-launcher 0.2.1 2026-07-30";
+            let comment = "romzeta-launcher 0.2.1 2026-07-30";
             let mut parts = comment.split_whitespace();
             (parts.next().unwrap(), parts.next().unwrap())
         };
@@ -255,7 +255,7 @@ mod volume {
     fn a_launcher_signed_by_a_stranger_is_never_started() {
         let signature = "untrusted comment: signature from a key we do not have\n\
                          RUQAAAAAAAAAAOaGxHqZQ0KtvVCJ6iKzXG8bFvKZ0V0kZ1qWzKz0hVYQ4rZ8Xk1t\n\
-                         trusted comment: gacasy-launcher 0.2.0\n\
+                         trusted comment: romzeta-launcher 0.2.0\n\
                          AAAA==\n";
         let signed = sigblock::attach(b"MZ signed by someone else", signature);
         let dir = fake_volume("stranger", Some(&signed));

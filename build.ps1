@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Builds and signs all three GaCaSy programs.
+    Builds and signs all three Romzeta programs.
 
 .DESCRIPTION
     One command for the whole thing. It does two jobs `cargo build` cannot:
@@ -45,10 +45,10 @@ function Invoke-Step {
     }
 }
 
-# A listener is built to trust keys/gacasy.pub and keys/dev.pub, and needs at
-# least one of them to exist. A fresh clone has neither: gacasy.pub arrives only
+# A listener is built to trust keys/romzeta.pub and keys/dev.pub, and needs at
+# least one of them to exist. A fresh clone has neither: romzeta.pub arrives only
 # with a published release, and dev.pub is gitignored because it is yours.
-$anchors = @('keys/gacasy.pub', 'keys/dev.pub') | Where-Object { Test-Path $_ }
+$anchors = @('keys/romzeta.pub', 'keys/dev.pub') | Where-Object { Test-Path $_ }
 if (-not $anchors) {
     if ($NoKeygen) {
         throw "No trust anchor in keys/ and -NoKeygen was given. Run ``cargo run -p xtask -- keygen`` first."

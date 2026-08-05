@@ -1,4 +1,4 @@
-# GaCaSy
+# Romzeta
 
 > ## ⚠️ Status: vibecoded
 >
@@ -13,14 +13,16 @@
 > refactor it into my own style, and check that it is actually correct as far as I know
 > how. Until that pass is done, this disclaimer stands.
 
-**Games. Cartridge. System.** — turn any storage device into a game cartridge that
+**Game cartridge system.** — turn any storage device into a game cartridge that
 *just works* when you plug it in.
 
-GaCaSy is made of three apps:
+*Romzeta* — **ROM** + *-zeta*, from the Slovak *kazeta*, "cartridge".
+
+Romzeta is made of three apps:
 
 - **Launcher** — lives *on the cartridge*. A clean, full-screen wall of cover art;
   click a cover to launch the game.
-- **Listener** — lives *on your PC*. When you plug in a GaCaSy cartridge, it recognizes
+- **Listener** — lives *on your PC*. When you plug in a Romzeta cartridge, it recognizes
   it and starts that cartridge's launcher automatically — like slotting a cartridge into
   a console. On Windows that's a small background app; on Linux nothing runs at all until
   you plug something in. *(Windows build works; Linux not started.)*
@@ -40,7 +42,7 @@ the alternative to the installer.
 ## Working tree
 
 ```text
-GaCaSy/
+Romzeta/
   launcher/          The cartridge-side app (Rust + webview)
     src/             App code, the UI, and the seed data files
       main.rs          Entry point; one file per job beside it (ui, launch,
@@ -182,7 +184,7 @@ cargo build --release -p installer  # embeds what that produced
   Windows is on are not offered), choose a key, add game folders (it finds each game's exe for
   you and asks when it can't be sure), pick covers, and copy. A drive that is already a
   cartridge opens for editing instead: add games, remove games, change the key.
-- **Set up this PC** — installs the listener to `%LOCALAPPDATA%\GaCaSy\`, where it keeps its
+- **Set up this PC** — installs the listener to `%LOCALAPPDATA%\Romzeta\`, where it keeps its
   config and its log too. Pairs it with your cartridge's key, starts it, and registers it to
   start at login. **Nothing in the installer asks for administrator**, this included.
 - **Uninstall** — removes the folder *and* the login entry.

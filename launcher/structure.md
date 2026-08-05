@@ -1,6 +1,6 @@
-# GaCaSy Launcher — Cartridge Side (developer reference)
+# Romzeta Launcher — Cartridge Side (developer reference)
 
-Part of the three-app **GaCaSy** game-cartridge system. This document covers the
+Part of the three-app **Romzeta** game-cartridge system. This document covers the
 **launcher**: the app that lives on the cartridge, shows its games, and launches them.
 The PC-side companion is documented in [`../listener/structure.md`](../listener/structure.md)
 and the setup tool that puts both in place in
@@ -166,7 +166,7 @@ one list has to be tested on a built `output/launcher.exe`, not just in dev.
   (`CARGO_MANIFEST_DIR/src/…`) so HTML edits show up on the next launch with no
   rebuild, falling back to the embedded copy on a deployed cartridge. Responses send
   `Cache-Control: no-store` so WebView2 never serves stale HTML/art.
-- **Single instance.** A Windows **named mutex** (`Local\GaCaSy.CartridgeLauncher`),
+- **Single instance.** A Windows **named mutex** (`Local\Romzeta.CartridgeLauncher`),
   not a socket. Enforced **only for the deployed exe** (its parent folder is named
   `output/`); skipped under `cargo run` (exe in `target/`) so a rebuild always opens a
   fresh window instead of silently no-opping on the held lock.

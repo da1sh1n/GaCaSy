@@ -1,6 +1,6 @@
-# GaCaSy Listener — PC Side (spec to build)
+# Romzeta Listener — PC Side (spec to build)
 
-Part of the three-app **GaCaSy** game-cartridge system. This document covers the
+Part of the three-app **Romzeta** game-cartridge system. This document covers the
 **listener**: the PC-side component that detects a connected cartridge, verifies it, and
 auto-starts that cartridge's launcher. The cartridge-side
 companion is documented in [`../launcher/structure.md`](../launcher/structure.md) and the
@@ -53,7 +53,7 @@ Trust is compiled in now, so there is nothing left for a config file to hold —
 [Trust](#trust) and [`src/settings.rs`](src/settings.rs).
 
 That folder is simply **wherever the exe is**. Installed, that is
-**`%LOCALAPPDATA%\GaCaSy\`** and nowhere else — the installer has one location and no
+**`%LOCALAPPDATA%\Romzeta\`** and nowhere else — the installer has one location and no
 elevated path to any other, chosen precisely so these files are always together and
 always writable ([`../installer/structure.md`](../installer/structure.md#elevation)). It can
 also be `output/`, or anywhere the exe was dropped by hand. The single exception is a
@@ -66,7 +66,7 @@ build and exits.
 
 The "am I a dev build?" test is **"is the exe inside this crate's `target/`?"**, deliberately
 not the launcher's "is my parent folder named `output`?". The latter misreads an installed
-`…\AppData\Local\GaCaSy\listener.exe` as a dev build, because that parent isn't named `output`
+`…\AppData\Local\Romzeta\listener.exe` as a dev build, because that parent isn't named `output`
 either — the bug noted against `running_deployed()` in
 [`../launcher/src/content.rs`](../launcher/src/content.rs).
 
@@ -188,7 +188,7 @@ A hidden window and a message loop. It costs a few megabytes and nothing else.
   enumerate mounted volumes once at startup and run each through the same core. Without this,
   "it only works if you plug it in after logging in" — a bug that looks like flakiness.
 - **Single-instance guard** — reuse the named-mutex pattern already proven in
-  [`../launcher/src/instance.rs`](../launcher/src/instance.rs) (`Local\GaCaSy.CartridgeLauncher`, via
+  [`../launcher/src/instance.rs`](../launcher/src/instance.rs) (`Local\Romzeta.CartridgeLauncher`, via
   `windows-sys`) under its own name. The `Run` entry can fire twice across a fast
   logoff/logon, and two listeners racing to launch the same cartridge means two launchers.
 - `#![windows_subsystem = "windows"]` — no console window, same as the launcher.
@@ -272,10 +272,10 @@ authenticity. The full reasoning and the migration are in [`../SIGNING.md`](../S
   does not compile at all. Were the accepted keys a line in a file beside the exe, anything
   that could write that file could append its own key and get arbitrary code auto-run on
   every insert. Changing what a listener trusts means replacing the listener.
-- **The signature declares a role.** All three GaCaSy programs are signed with the same key,
+- **The signature declares a role.** All three Romzeta programs are signed with the same key,
   so "signed by us" is not the same question as "is a launcher" — a genuine `installer.exe`
   renamed to `launcher.exe` is still genuinely signed. minisign authenticates a *trusted
-  comment* alongside the payload, so the role written into it (`gacasy-launcher`) is as
+  comment* alongside the payload, so the role written into it (`romzeta-launcher`) is as
   unforgeable as the file itself. [`../trust/`](../trust/) checks both, and is the one place
   that does for every program that needs to.
 - **The file is held still.** Verifying bytes and then executing a *path* is two different
@@ -321,9 +321,9 @@ already handled are ignored) and the log path are compiled in — see
 found, read and left alone is a file worth deleting.
 
 The log defaults to `listener.log` **beside the exe**, so the listener's two files sit in one
-folder — for an installed listener that is `%LOCALAPPDATA%\GaCaSy\`, which it can always
+folder — for an installed listener that is `%LOCALAPPDATA%\Romzeta\`, which it can always
 write. A copy dropped by hand somewhere read-only falls back to
-`%LOCALAPPDATA%\GaCaSy\listener.log` rather than going silent, so there is only ever one
+`%LOCALAPPDATA%\Romzeta\listener.log` rather than going silent, so there is only ever one
 place to look.
 
 Reading the log is the only way to see what the listener did — it has no console and no

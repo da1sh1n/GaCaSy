@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! Putting a signature into a binary, and reading one back out.
@@ -39,7 +39,7 @@ pub fn sign(path: &Path, key: &minisign::SecretKey, comment: &str) -> Result<(),
 /// What a signed binary turned out to be.
 #[derive(Debug)]
 pub struct Verified {
-    /// Which trust anchor accepted it — `gacasy` for a release build, `dev` for
+    /// Which trust anchor accepted it — `romzeta` for a release build, `dev` for
     /// one of yours.
     pub anchor: String,
     /// The signer's trusted comment, which minisign authenticates along with the
@@ -62,12 +62,15 @@ pub fn verify(path: &Path, anchors: &[Anchor]) -> Result<Verified, String> {
         .map_err(|e| format!("{} has a malformed signature: {e}", path.display()))?;
 
     if anchors.is_empty() {
-        return Err("no public keys to check against — keys/gacasy.pub is missing".to_string());
+        return Err("no public keys to check against — keys/romzeta.pub is missing".to_string());
     }
 
     for anchor in anchors {
         let Ok(key) = minisign_verify::PublicKey::from_base64(&anchor.base64) else {
-            return Err(format!("keys/{}.pub is not a minisign public key", anchor.name));
+            return Err(format!(
+                "keys/{}.pub is not a minisign public key",
+                anchor.name
+            ));
         };
         if key.verify(payload, &signature, false).is_ok() {
             return Ok(Verified {

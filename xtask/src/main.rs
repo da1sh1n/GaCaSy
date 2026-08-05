@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-// GaCaSy's build tool. Never shipped; nothing it depends on is linked into
+// Romzeta's build tool. Never shipped; nothing it depends on is linked into
 // anything a user runs.
 //
-// It exists for one reason: a GaCaSy release is a four-stage sequence whose
+// It exists for one reason: a Romzeta release is a four-stage sequence whose
 // ordering constraint cargo cannot see (see release.rs), and the failure from
 // getting it wrong is a cartridge that builds cleanly and is then silently
 // refused by every listener. That sequence belongs in code.
@@ -34,13 +34,13 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 const USAGE: &str = "\
-GaCaSy build tool.
+Romzeta build tool.
 
   cargo run -p xtask -- release          build and sign launcher, listener, installer
   cargo run -p xtask -- keygen           generate a dev signing key -> keys/dev.pub
-  cargo run -p xtask -- keygen --release the one release key -> keys/gacasy.pub (committed)
+  cargo run -p xtask -- keygen --release the one release key -> keys/romzeta.pub (committed)
   cargo run -p xtask -- sign <exe>...    sign in place
-  cargo run -p xtask -- verify <exe>...  check against keys/gacasy.pub and keys/dev.pub
+  cargo run -p xtask -- verify <exe>...  check against keys/romzeta.pub and keys/dev.pub
   cargo run -p xtask -- version          show the project version and every crate's
 ";
 
@@ -81,8 +81,8 @@ fn sign_all(root: &Path, paths: &[PathBuf]) -> Result<(), String> {
         let name = path
             .file_stem()
             .and_then(|s| s.to_str())
-            .unwrap_or("gacasy");
-        sign::sign(path, &key, &format!("gacasy-{name}"))?;
+            .unwrap_or("romzeta");
+        sign::sign(path, &key, &format!("romzeta-{name}"))?;
         println!("signed {}", path.display());
     }
     Ok(())

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! Which drives may become a cartridge.
@@ -66,7 +66,7 @@ include!(concat!(env!("OUT_DIR"), "/trust_anchors.rs"));
 /// The version of `<root>/launcher.exe`, if it is a launcher we signed.
 ///
 /// `None` for a drive with no launcher, an unsigned one, one signed by a key
-/// this build does not carry, or a genuine GaCaSy binary that is not a launcher.
+/// this build does not carry, or a genuine Romzeta binary that is not a launcher.
 /// All four mean the same thing here — this is not a cartridge this installer
 /// made — and none of them are worth telling apart on a screen whose next
 /// question is "create or edit?".
@@ -157,7 +157,7 @@ impl Volume {
         self.eligibility.allowed()
     }
 
-    /// `E:\ — GACASY (57.2 GB free of 119 GB)`, the one line the picker shows.
+    /// `E:\ — ROMZETA (57.2 GB free of 119 GB)`, the one line the picker shows.
     pub fn summary(&self) -> String {
         let mut text = self.root.display().to_string();
         if !self.label.is_empty() {

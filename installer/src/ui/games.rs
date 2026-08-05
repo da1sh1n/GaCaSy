@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! The games screen — steps 3 to 4 of job 1, and all of job 3's editing.
@@ -13,7 +13,6 @@
 //! The executable row is the one that matters. Auto-detection preselects a
 //! *clear* winner and leaves the field empty otherwise, and Browse is offered
 //! either way — the guess is never presented as settled.
-
 
 use crate::app::{App, Mode};
 use crate::version;
@@ -39,9 +38,7 @@ pub fn screen(app: &mut App, ctx: &egui::Context, ui: &mut egui::Ui) {
         {
             app.add_game(ctx, folder);
         }
-        ui.label(
-            egui::RichText::new("The whole folder is copied onto the cartridge.").weak(),
-        );
+        ui.label(egui::RichText::new("The whole folder is copied onto the cartridge.").weak());
     });
     ui.add_space(8.0);
 
@@ -95,13 +92,14 @@ fn stale_launcher(app: &mut App, ctx: &egui::Context, ui: &mut egui::Ui) {
     let Some(theirs) = app.stale_launcher else {
         return;
     };
-    let ours = version::bundled().expect(
-        "stale_launcher is only set when both the probe and the bundled version parsed",
-    );
+    let ours = version::bundled()
+        .expect("stale_launcher is only set when both the probe and the bundled version parsed");
     egui::Frame::group(ui.style()).show(ui, |ui| {
         ui.colored_label(
             WARN,
-            format!("This cartridge's launcher is version {theirs}, this installer carries {ours}."),
+            format!(
+                "This cartridge's launcher is version {theirs}, this installer carries {ours}."
+            ),
         );
         if ui.button("Update launcher").clicked() {
             app.update_launcher(ctx);
@@ -203,7 +201,8 @@ fn draft(app: &mut App, index: usize, ui: &mut egui::Ui) -> bool {
                 .width(380.0)
                 .show_ui(ui, |ui| {
                     for (n, candidate) in candidates.iter().enumerate() {
-                        let label = format!("{} — {}", candidate.display(), human_bytes(candidate.bytes));
+                        let label =
+                            format!("{} — {}", candidate.display(), human_bytes(candidate.bytes));
                         if ui
                             .selectable_label(draft.selected == Some(n), label)
                             .clicked()

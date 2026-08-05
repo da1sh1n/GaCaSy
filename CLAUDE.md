@@ -122,14 +122,14 @@ line, occasionally two. Explanations of decisions belong in the reply to the use
 ### Markdown / docs
 - Only touch a doc file when the change is asked for or is directly required by the code change.
 
-## 9. Project-specific — GaCaSy
+## 9. Project-specific — Romzeta
 
 - **Always build binaries through `xtask`.** Shipped binaries must be signed; never produce a
   release artifact with a bare `cargo build --release`.
 
 ```
 cargo run -p xtask -- release          build and sign launcher, listener, installer
-cargo run -p xtask -- verify <exe>...  check against keys/gacasy.pub and keys/dev.pub
+cargo run -p xtask -- verify <exe>...  check against keys/romzeta.pub and keys/dev.pub
 cargo run -p xtask -- sign <exe>...    sign in place
 cargo run -p xtask -- keygen           dev signing key -> keys/dev.pub
 cargo run -p xtask -- version          project version + every crate's

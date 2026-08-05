@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! Starting a game, and waiting for it to actually come up.
@@ -60,12 +60,18 @@ pub fn spawn(
     // check at the one place that actually spawns something is cheaper than a
     // second path from an untrusted `catalog.json` entry to a running process.
     if !catalog::is_contained(&game.exe) {
-        log::line(base, &format!("REFUSED {}: exe path escapes the cartridge", game.name));
+        log::line(
+            base,
+            &format!("REFUSED {}: exe path escapes the cartridge", game.name),
+        );
         return Err("Failed to start — game files missing".to_string());
     }
 
     let exe = base.join(&game.exe);
-    log::line(base, &format!("launching {} ({})", game.name, exe.display()));
+    log::line(
+        base,
+        &format!("launching {} ({})", game.name, exe.display()),
+    );
 
     // Checked again here even though the catalog was screened at startup: the
     // cartridge is removable, and the file may be gone since.

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! The version contract, checked before anything is built.
@@ -24,7 +24,7 @@ pub struct Crate {
     pub version: String,
 }
 
-/// The project version from `[workspace.metadata.gacasy]`, and every member's.
+/// The project version from `[workspace.metadata.romzeta]`, and every member's.
 pub fn read(root: &Path) -> Result<(u64, Vec<Crate>), String> {
     let text = read_manifest(&root.join("Cargo.toml"))?;
     let table: toml::Table = text
@@ -38,11 +38,11 @@ pub fn read(root: &Path) -> Result<(u64, Vec<Crate>), String> {
 
     let project_version = workspace
         .get("metadata")
-        .and_then(|v| v.get("gacasy"))
+        .and_then(|v| v.get("romzeta"))
         .and_then(|v| v.get("project_version"))
         .and_then(|v| v.as_integer())
         .ok_or(
-            "the root Cargo.toml has no [workspace.metadata.gacasy] project_version — \
+            "the root Cargo.toml has no [workspace.metadata.romzeta] project_version — \
              it is the declared truth every crate's major has to match",
         )?;
 
@@ -91,7 +91,12 @@ pub fn check(root: &Path) -> Result<u64, String> {
     let drifted: Vec<_> = crates
         .iter()
         .filter(|c| major(&c.version) != Some(project_version))
-        .map(|c| format!("  {} is {} — expected {project_version}.y.z", c.name, c.version))
+        .map(|c| {
+            format!(
+                "  {} is {} — expected {project_version}.y.z",
+                c.name, c.version
+            )
+        })
         .collect();
 
     if !drifted.is_empty() {

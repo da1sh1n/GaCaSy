@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! Whether a binary may be run, and what it turned out to be.
@@ -31,7 +31,7 @@
 //!    unforgeable as the payload; because it is *only* covered once step 1 has
 //!    passed, reading it before then would be reading attacker-controlled text.
 //! 3. **Is that the thing we asked for?** A signed `installer.exe` is a
-//!    perfectly genuine GaCaSy binary and is not a launcher. Without this step
+//!    perfectly genuine Romzeta binary and is not a launcher. Without this step
 //!    the trust decision is "signed by us", which is not the same as "is the
 //!    program the caller is about to run" — see [`Refusal::WrongRole`].
 //!
@@ -74,9 +74,9 @@ impl Anchor<'_> {
 /// Here rather than in `xtask` alone because a signer and a checker that
 /// disagree about this string produce a cartridge that is silently ignored by
 /// every listener on earth. One definition, two users, no drift.
-pub const LAUNCHER_ROLE: &str = "gacasy-launcher";
-pub const LISTENER_ROLE: &str = "gacasy-listener";
-pub const INSTALLER_ROLE: &str = "gacasy-installer";
+pub const LAUNCHER_ROLE: &str = "romzeta-launcher";
+pub const LISTENER_ROLE: &str = "romzeta-listener";
+pub const INSTALLER_ROLE: &str = "romzeta-installer";
 
 /// What a verified signature says about the binary it came from.
 ///
@@ -112,7 +112,7 @@ pub enum Refusal {
     /// Correctly signed, by a key we do not accept.
     Untrusted,
     /// Signed by a key we *do* accept, for a different job. The interesting
-    /// one: it means someone took a genuine GaCaSy binary and put it where a
+    /// one: it means someone took a genuine Romzeta binary and put it where a
     /// launcher goes.
     WrongRole { expected: String, found: String },
 }

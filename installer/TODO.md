@@ -1,4 +1,4 @@
-# GaCaSy Installer — TODO
+# Romzeta Installer — TODO
 
 The installer specced in [`structure.md`](structure.md) is **built** and has been exercised end
 to end on real media. What is left is the Linux target.

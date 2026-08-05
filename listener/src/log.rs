@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! Append-only activity log.
@@ -40,7 +40,7 @@ impl Log {
     /// written to is different: that is the listener losing its only voice, so
     /// rather than going quiet it retries at [`settings::fallback_log_path`]. An
     /// *installed* listener never gets here — it lives in
-    /// `%LOCALAPPDATA%\GaCaSy`, which is both writable and the very folder the
+    /// `%LOCALAPPDATA%\Romzeta`, which is both writable and the very folder the
     /// fallback names — so this is for an exe dropped by hand somewhere
     /// read-only. Only if that fails too does it fall silent.
     pub fn open(path: Option<PathBuf>) -> Log {

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-// GaCaSy listener — the PC side.
+// Romzeta listener — the PC side.
 //
 // Notices a cartridge being connected, checks that it is one this PC trusts,
 // and starts that cartridge's launcher. Plugging a cartridge in then "just
@@ -44,7 +44,7 @@
 //
 // The listener keeps its files in one folder:
 //
-//   %LOCALAPPDATA%\GaCaSy\     (output/ in the repo)
+//   %LOCALAPPDATA%\Romzeta\     (output/ in the repo)
 //     listener.exe   <- this program
 //     listener.log   <- what it did, and why it ignored what it ignored
 //
@@ -176,7 +176,7 @@ fn attach_console() {}
 
 /// The folder holding `listener.exe` and its log.
 ///
-/// Normally that is simply the folder the exe is in — `%LOCALAPPDATA%\GaCaSy\`
+/// Normally that is simply the folder the exe is in — `%LOCALAPPDATA%\Romzeta\`
 /// where the installer puts it, `output/`, or wherever the exe was dropped by
 /// hand. The one exception is a `cargo run`/`cargo test` build, whose exe sits
 /// under `target/`: that resolves to the repo's `output/` instead, so
@@ -185,7 +185,7 @@ fn attach_console() {}
 /// The dev check is "is the exe inside a `target/` belonging to this crate?"
 /// rather than the launcher's "is the exe's parent folder named `output`?". The
 /// difference matters: the latter silently treats an installed
-/// `…\AppData\Local\GaCaSy\listener.exe` as a dev build, because that parent is
+/// `…\AppData\Local\Romzeta\listener.exe` as a dev build, because that parent is
 /// not named `output` either — the bug noted against `running_deployed()` in
 /// ../../launcher/src/main.rs.
 ///

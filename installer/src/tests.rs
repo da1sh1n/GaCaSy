@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! Every test in this crate, one submodule per source module.
@@ -56,7 +56,11 @@ mod payload {
             ("listener.exe", listener(), LISTENER_BYTES),
         ] {
             let bytes = unpacked.unwrap_or_else(|e| panic!("{name} did not unpack: {e}"));
-            assert_eq!(bytes.len() as u64, expected, "{name} unpacked to the wrong size");
+            assert_eq!(
+                bytes.len() as u64,
+                expected,
+                "{name} unpacked to the wrong size"
+            );
             assert!(
                 sigblock::is_signed(&bytes),
                 "{name} came out of the payload without its signature — every cartridge \
@@ -341,10 +345,8 @@ mod volume {
     fn only_a_verified_signature_makes_a_cartridge() {
         use crate::volume::attested_launcher;
 
-        let dir = std::env::temp_dir().join(format!(
-            "gacasy-installer-attest-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("romzeta-installer-attest-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("temp dir");
 
@@ -353,14 +355,13 @@ mod volume {
 
         // A file with the right name and nothing else — what running it used to
         // accept.
-        std::fs::write(dir.join(crate::cartridge::LAUNCHER_NAME), b"MZ not signed")
-            .expect("write");
+        std::fs::write(dir.join(crate::cartridge::LAUNCHER_NAME), b"MZ not signed").expect("write");
         assert_eq!(attested_launcher(&dir), None);
 
         // A well-formed signature block from a key this build does not carry.
         let signature = "untrusted comment: signature from a key we do not have\n\
                          RUQAAAAAAAAAAOaGxHqZQ0KtvVCJ6iKzXG8bFvKZ0V0kZ1qWzKz0hVYQ4rZ8Xk1t\n\
-                         trusted comment: gacasy-launcher 9.9.9 2026-07-30\n\
+                         trusted comment: romzeta-launcher 9.9.9 2026-07-30\n\
                          AAAA==\n";
         let signed = sigblock::attach(b"MZ signed by someone else", signature);
         std::fs::write(dir.join(crate::cartridge::LAUNCHER_NAME), signed).expect("write");

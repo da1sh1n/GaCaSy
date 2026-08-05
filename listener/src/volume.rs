@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! The shared core: everything that happens once a volume shows up.
@@ -79,9 +79,9 @@ pub fn handle_volume(root: &Path, log: &Log) -> Outcome {
                 launcher.anchor
             ));
             alert::warn(
-                "GaCaSy — cartridge not compatible",
+                "Romzeta — cartridge not compatible",
                 &format!(
-                    "This cartridge's launcher is version {theirs}, but the GaCaSy installed \
+                    "This cartridge's launcher is version {theirs}, but the Romzeta installed \
                      on this PC is version {ours}.\n\n\
                      They share the same signing key, so both are genuine — but the first \
                      number has to match for them to work together. Update whichever is \

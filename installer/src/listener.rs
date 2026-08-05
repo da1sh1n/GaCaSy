@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! Job 2 — putting the listener on the PC.
@@ -21,14 +21,14 @@
 //! whose contents could grant a cartridge the right to run. Installing is now
 //! one file and one registry value.
 //!
-//! ## Where it lives: `%LOCALAPPDATA%\GaCaSy`, and only there
+//! ## Where it lives: `%LOCALAPPDATA%\Romzeta`, and only there
 //!
 //! One location, no choice, no elevation. The listener keeps its **exe and log
 //! in one folder**, and this is the folder — the same one
 //! `settings::fallback_log_path` in the listener already names, so the log is
 //! simply *there* rather than somewhere a second document has to explain.
 //!
-//! `../structure.md` originally specced `C:\Program Files\GaCaSy\` and named the
+//! `../structure.md` originally specced `C:\Program Files\Romzeta\` and named the
 //! problem with it in the same breath: the user the listener runs as cannot
 //! write there, so its log has to go somewhere else. An all-users install was
 //! never buying much either — autostart is `HKCU\…\Run`, per user, wherever the
@@ -56,7 +56,11 @@ use std::process::Command;
 use crate::autoplay;
 use crate::payload;
 
-pub const EXE_NAME: &str = if cfg!(windows) { "listener.exe" } else { "listener" };
+pub const EXE_NAME: &str = if cfg!(windows) {
+    "listener.exe"
+} else {
+    "listener"
+};
 
 /// The config file earlier builds wrote. Nothing reads it any more; it is named
 /// here only so an upgrade can clear it away rather than leave a file behind
@@ -64,13 +68,13 @@ pub const EXE_NAME: &str = if cfg!(windows) { "listener.exe" } else { "listener"
 const STALE_CONFIG_FILE: &str = "config.toml";
 
 /// The folder name, under `%LOCALAPPDATA%`.
-const FOLDER: &str = "GaCaSy";
+const FOLDER: &str = "Romzeta";
 
 /// Name of the `Run` value. Also what the user sees in Task Manager's Startup
 /// tab, so it is a product name and not an exe name.
-pub const AUTOSTART_NAME: &str = "GaCaSy Listener";
+pub const AUTOSTART_NAME: &str = "Romzeta Listener";
 
-/// `%LOCALAPPDATA%\GaCaSy` — the listener's home, and the only place this
+/// `%LOCALAPPDATA%\Romzeta` — the listener's home, and the only place this
 /// installer writes it.
 ///
 /// `None` only when the environment doesn't say where `%LOCALAPPDATA%` is,
@@ -135,7 +139,7 @@ pub fn find() -> Vec<Installed> {
 /// setup. A cartridge made by this same installer works the moment it is
 /// plugged in, on this PC or any other with this listener on it.
 ///
-/// `suppress_autoplay` is the one thing here that reaches outside GaCaSy's own
+/// `suppress_autoplay` is the one thing here that reaches outside Romzeta's own
 /// settings, which is why it is a parameter and not a decision made in this
 /// function: see [`crate::autoplay`].
 ///
@@ -206,7 +210,9 @@ pub fn install(start_now: bool, suppress_autoplay: bool) -> Result<Vec<String>, 
             // a cartridge in does anything, which reads as the install having
             // failed.
             Ok(_) => done.push("Started it — plug a cartridge in to test".into()),
-            Err(e) => done.push(format!("Could not start it now ({e}); it will start at login")),
+            Err(e) => done.push(format!(
+                "Could not start it now ({e}); it will start at login"
+            )),
         }
     }
     Ok(done)

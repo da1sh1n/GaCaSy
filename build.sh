@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds and signs all three GaCaSy programs.
+# Builds and signs all three Romzeta programs.
 #
 # One command for the whole thing. It does two jobs `cargo build` cannot:
 #
@@ -37,11 +37,11 @@ step() {
     "$@"
 }
 
-# A listener is built to trust keys/gacasy.pub and keys/dev.pub, and needs at
-# least one of them to exist. A fresh clone has neither: gacasy.pub arrives only
+# A listener is built to trust keys/romzeta.pub and keys/dev.pub, and needs at
+# least one of them to exist. A fresh clone has neither: romzeta.pub arrives only
 # with a published release, and dev.pub is gitignored because it is yours.
 anchors=()
-for key in keys/gacasy.pub keys/dev.pub; do
+for key in keys/romzeta.pub keys/dev.pub; do
     [ -f "$key" ] && anchors+=("$key")
 done
 

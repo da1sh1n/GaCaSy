@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! Every test in this crate.
@@ -16,8 +16,8 @@
 use crate::*;
 
 const EXE: &[u8] = b"MZ\x90\x00 not really a PE, but neither is anything else here";
-const SIG: &str = "untrusted comment: signature from gacasy\nRUQf6LRCGA9i53==\n\
-                   trusted comment: gacasy-launcher 0.2.0\nAbCd==\n";
+const SIG: &str = "untrusted comment: signature from romzeta\nRUQf6LRCGA9i53==\n\
+                   trusted comment: romzeta-launcher 0.2.0\nAbCd==\n";
 
 #[test]
 fn round_trips() {

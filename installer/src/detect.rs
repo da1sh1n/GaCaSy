@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! Finding the exe inside a game folder — the fiddliest part of job 1.
@@ -114,8 +114,11 @@ pub fn scan(root: &Path, cancel: &AtomicBool) -> Scan {
     }
     // Descending score; the path breaks ties so the order is stable between runs
     // and the "is the top one clearly ahead" test can't flip on a re-scan.
-    scan.candidates
-        .sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.relative.cmp(&b.relative)));
+    scan.candidates.sort_by(|a, b| {
+        b.score
+            .cmp(&a.score)
+            .then_with(|| a.relative.cmp(&b.relative))
+    });
     scan
 }
 
@@ -133,7 +136,9 @@ fn walk(dir: &Path, relative: &Path, depth: usize, cancel: &AtomicBool, scan: &m
             scan.cancelled = true;
             return;
         }
-        let Ok(kind) = entry.file_type() else { continue };
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
         let child = relative.join(entry.file_name());
 
         // Symlinks are neither followed nor counted: a link loop would make the
@@ -229,7 +234,8 @@ fn score(relative: &Path, folder_name: &str, bytes: u64) -> i64 {
     if !stem.is_empty() && !folder.is_empty() {
         if squash(&stem) == squash(&folder) {
             score += EXACT_NAME_BONUS;
-        } else if squash(&folder).contains(&squash(&stem)) || squash(&stem).contains(&squash(&folder))
+        } else if squash(&folder).contains(&squash(&stem))
+            || squash(&stem).contains(&squash(&folder))
         {
             score += PARTIAL_NAME_BONUS;
         }

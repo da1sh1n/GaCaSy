@@ -95,7 +95,7 @@ flate2 = { version = "1.1.9", default-features = false, features = ["rust_backen
 toml = "1.1.4"
 
 [target.'cfg(windows)'.dependencies]
-# Nothing here elevates. The listener installs into %LOCALAPPDATA%\GaCaSy and a
+# Nothing here elevates. The listener installs into %LOCALAPPDATA%\Romzeta and a
 # cartridge goes on a drive the user can already write to, so there is no
 # process-token check and no ShellExecuteW "runas" — see src/listener.rs.
 windows-sys = { version = "0.61.2", features = [

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! Everything the installer writes, carried inside it.
@@ -9,7 +9,7 @@
 //! One self-contained exe: no downloads, no prerequisites, no side-by-side
 //! files. `build.rs` stages each of these in `OUT_DIR` and fails the build with
 //! a clear message when one is missing, so the bytes below are always either the
-//! real artifact or — under the documented `GACASY_PAYLOAD_OPTIONAL` escape
+//! real artifact or — under the documented `ROMZETA_PAYLOAD_OPTIONAL` escape
 //! hatch — deliberately empty.
 //!
 //! # The two programs are compressed

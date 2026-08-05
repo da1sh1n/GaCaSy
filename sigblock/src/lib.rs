@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! The signature block — how a GaCaSy binary carries its own minisign
+//! The signature block — how a Romzeta binary carries its own minisign
 //! signature, with no file beside it.
 //!
 //! A cartridge is one file. That is the whole point: no `.cartridge` marker to
@@ -23,7 +23,7 @@
 //! [ minisig text, N bytes UTF-8 (the 2-line format)  ]
 //! [ N            u32 little-endian                   ]  }
 //! [ format       u16 little-endian, = 1              ]  } 16-byte footer
-//! [ magic        b"GACASYSIG\0" (10 bytes)           ]  }
+//! [ magic        b"ROMZETASIG" (10 bytes)            ]  }
 //! ```
 //!
 //! The signed bytes are then byte-for-byte the linker's output, so verifying is
@@ -38,7 +38,7 @@
 //!
 //! [`split`] runs against whatever a stranger just plugged into the machine. A
 //! truncated file, a length field claiming four gigabytes, sixteen bytes of
-//! coincidence — all of them mean "this is not a signed GaCaSy binary", which is
+//! coincidence — all of them mean "this is not a signed Romzeta binary", which is
 //! the same answer as an ordinary drive gets, and none of them are worth taking
 //! the listener down over. There is deliberately no `Result` here: the caller
 //! has exactly one thing to do about a bad block, and it is what it would do
@@ -48,8 +48,8 @@
 //! whether it *verifies* is [`minisign_verify`](https://docs.rs/minisign-verify)'s
 //! job, and the listener's.
 
-/// Identifies the footer. The trailing NUL keeps the whole thing 16 bytes.
-const MAGIC: &[u8; 10] = b"GACASYSIG\0";
+/// Identifies the footer. Ten bytes exactly, which keeps the whole thing 16.
+const MAGIC: &[u8; 10] = b"ROMZETASIG";
 
 /// The only block format that exists. A future one would change the layout of
 /// everything above the magic, so a block that declares anything else is left
@@ -116,7 +116,7 @@ pub fn attach(bytes: &[u8], signature: &str) -> Vec<u8> {
     out
 }
 
-/// The `--version` / `--signature` plumbing every GaCaSy program shares.
+/// The `--version` / `--signature` plumbing every Romzeta program shares.
 ///
 /// All three are GUI-subsystem binaries that nonetheless have to answer two
 /// questions on a command line, and all three answer them the same way. Kept
@@ -132,7 +132,7 @@ pub mod cli {
 
     /// Prints the signature block, or `unsigned`.
     ///
-    /// Note what this is *not* for. Nothing in GaCaSy establishes another
+    /// Note what this is *not* for. Nothing in Romzeta establishes another
     /// program's identity by running it and reading this — a binary reporting
     /// its own trustworthiness proves nothing, and asking would mean executing
     /// the very thing you are deciding whether to execute. Signatures are

@@ -3,7 +3,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Copyright (C) 2026 da1sh1n
 -->
 
-# Signing and building GaCaSy
+# Signing and building Romzeta
 
 Everything about how a cartridge proves it is a cartridge, and how to build the
 three programs without producing something that silently does nothing.
@@ -61,8 +61,8 @@ everything else:
   us" is not the same question as "is a launcher" — a genuine `installer.exe`
   renamed to `launcher.exe` is still genuinely signed. minisign authenticates a
   *trusted comment* alongside the payload (a second signature over
-  `signature ‖ comment`), so the role written into it — `gacasy-launcher`,
-  `gacasy-listener`, `gacasy-installer` — is as unforgeable as the file itself.
+  `signature ‖ comment`), so the role written into it — `romzeta-launcher`,
+  `romzeta-listener`, `romzeta-installer` — is as unforgeable as the file itself.
   [trust/src/lib.rs](trust/src/lib.rs) is the one place that checks both, for
   every program that needs to.
 - **What this does not cover.** The signature is over `launcher.exe`'s own
@@ -84,16 +84,16 @@ everything else:
 
 ## 2. The keys
 
-GaCaSy uses [minisign](https://jedisct1.github.io/minisign/) (Ed25519). There is
+Romzeta uses [minisign](https://jedisct1.github.io/minisign/) (Ed25519). There is
 one secret key and two public key *slots*.
 
 | File | What it is | Committed? |
 |---|---|---|
-| `keys/gacasy.pub` | The release key. Every published listener trusts it. | **yes** — it is public |
+| `keys/romzeta.pub` | The release key. Every published listener trusts it. | **yes** — it is public |
 | `keys/dev.pub` | Whatever `xtask keygen` made on your machine. | no — gitignored |
-| `~/.gacasy/gacasy.key` | **The secret key.** | **never** |
+| `~/.romzeta/romzeta.key` | **The secret key.** | **never** |
 
-On Windows that secret path is `%USERPROFILE%\.gacasy\gacasy.key`.
+On Windows that secret path is `%USERPROFILE%\.romzeta\romzeta.key`.
 
 A listener trusts **both** public keys, and that is the whole point of the
 two-slot design: your build accepts your cartridges *and* official ones, while
@@ -125,7 +125,7 @@ replaced.
 cargo run -p xtask -- keygen
 ```
 
-Writes the secret to `~/.gacasy/gacasy.key` and the public half to
+Writes the secret to `~/.romzeta/romzeta.key` and the public half to
 `keys/dev.pub`. Once per machine. It refuses to overwrite an existing key,
 because doing so would orphan every cartridge already signed with the old one.
 
@@ -133,11 +133,11 @@ By default the key is **unencrypted**, and that is a deliberate and reasonable
 choice for a key whose only job is signing your own local builds. Nothing needs
 to be configured; there is no password, no `.env`, no prompt.
 
-If you want a key you have to unlock, set `GACASY_SIGNING_PASSWORD` *before*
+If you want a key you have to unlock, set `ROMZETA_SIGNING_PASSWORD` *before*
 running `keygen`. From then on that same variable (environment, or a `.env` at
 the repo root) unlocks it; without it you get an interactive prompt.
 
-`--release` writes `keys/gacasy.pub` instead. There is only ever one of those,
+`--release` writes `keys/romzeta.pub` instead. There is only ever one of those,
 ever, so it refuses to overwrite it.
 
 ---
@@ -152,12 +152,12 @@ with the exe. So the signature lives *inside* the exe, appended past the end:
 [ minisig text, N bytes UTF-8 (the 2-line format)  ]
 [ N            u32 little-endian                   ]  }
 [ format       u16 little-endian, = 1              ]  } 16-byte footer
-[ magic        b"GACASYSIG\0" (10 bytes)           ]  }
+[ magic        b"ROMZETASIG" (10 bytes)            ]  }
 ```
 
 You cannot sign bytes that already contain their own signature, so the choice is
 between reserving a blank region (sign it blank, fill it in, blank it again to
-verify) or appending past the end. GaCaSy appends. The signed bytes are then
+verify) or appending past the end. Romzeta appends. The signed bytes are then
 byte-for-byte the linker's output, and verifying is just "chop off the footer and
 check what is left".
 
@@ -212,9 +212,9 @@ Two structural decisions back this up:
 ```
 cargo run -p xtask -- release          build and sign all three, in order
 cargo run -p xtask -- keygen           make a dev signing key (once per machine)
-cargo run -p xtask -- keygen --release make the one release key -> keys/gacasy.pub
+cargo run -p xtask -- keygen --release make the one release key -> keys/romzeta.pub
 cargo run -p xtask -- sign <exe>...    sign in place
-cargo run -p xtask -- verify <exe>...  check against keys/gacasy.pub and keys/dev.pub
+cargo run -p xtask -- verify <exe>...  check against keys/romzeta.pub and keys/dev.pub
 cargo run -p xtask -- version          show the project version and every crate's
 ```
 
@@ -238,10 +238,10 @@ target/release/launcher.exe --version
 
 | Variable | Effect |
 |---|---|
-| `GACASY_SIGNING_KEY` | Path to the secret key. Overrides `~/.gacasy/gacasy.key`. |
-| `GACASY_SIGNING_PASSWORD` | Unlocks an encrypted key. **Not needed for the default unencrypted key.** |
-| `GACASY_LAUNCHER_EXE` / `GACASY_LISTENER_EXE` | Where the installer finds its payload. |
-| `GACASY_PAYLOAD_OPTIONAL=1` | Build the installer with an empty payload, for UI work. The result refuses to install anything. |
+| `ROMZETA_SIGNING_KEY` | Path to the secret key. Overrides `~/.romzeta/romzeta.key`. |
+| `ROMZETA_SIGNING_PASSWORD` | Unlocks an encrypted key. **Not needed for the default unencrypted key.** |
+| `ROMZETA_LAUNCHER_EXE` / `ROMZETA_LISTENER_EXE` | Where the installer finds its payload. |
+| `ROMZETA_PAYLOAD_OPTIONAL=1` | Build the installer with an empty payload, for UI work. The result refuses to install anything. |
 
 All of these can also live in a `.env` at the repo root (gitignored). Real
 environment variables win over `.env`. The `.env` file is entirely optional —
@@ -256,19 +256,19 @@ a listener what to trust, but gives the machine nothing to sign *with*.
 
 What you copy is the secret key:
 
-1. On machine A, take `~/.gacasy/gacasy.key`
-   (`%USERPROFILE%\.gacasy\gacasy.key`).
+1. On machine A, take `~/.romzeta/romzeta.key`
+   (`%USERPROFILE%\.romzeta\romzeta.key`).
 2. Move it to machine B over a channel you trust — not the git repo, not a
    pastebin, not chat. A password manager's secure-file field or an encrypted
    USB stick is the right shape of thing.
 3. Put it at the same path on machine B, or anywhere you like with
-   `GACASY_SIGNING_KEY` pointing at it.
+   `ROMZETA_SIGNING_KEY` pointing at it.
 4. Copy `keys/dev.pub` across too, so machine B's listener trusts the key and
    `installer/build.rs` can verify the payload.
 5. Do **not** run `keygen` on machine B — that mints a *different* identity. It
    will refuse to overwrite an existing key anyway.
 
-If the key was created with `GACASY_SIGNING_PASSWORD`, machine B needs the same
+If the key was created with `ROMZETA_SIGNING_PASSWORD`, machine B needs the same
 password.
 
 > There is currently no `xtask` command to re-derive `dev.pub` from an existing
@@ -278,7 +278,7 @@ password.
 
 ## 7. Troubleshooting
 
-**`no trusted public key: neither keys/gacasy.pub nor keys/dev.pub exists`**
+**`no trusted public key: neither keys/romzeta.pub nor keys/dev.pub exists`**
 Fresh clone, no key yet. Run `cargo run -p xtask -- keygen`, or just use
 `build.ps1` / `build.sh`, which does it for you.
 
@@ -314,7 +314,7 @@ applies to every removable drive on that account, not only cartridges, which is
 why it is asked for rather than assumed — see `installer/src/autoplay.rs`.
 
 **The listener refuses a launcher whose signature is fine.**
-Check the project version. `[workspace.metadata.gacasy] project_version` is the
+Check the project version. `[workspace.metadata.romzeta] project_version` is the
 compatibility contract: the listener asks a *verified* launcher for its version
 and refuses one whose major differs from its own. `xtask version` shows the lot;
 `xtask release` refuses to ship a set whose majors have drifted apart.
@@ -326,7 +326,7 @@ and refuses one whose major differs from its own. `xtask version` shows the lot;
 - `keys/dev.pub` must **not** be in a published build. A listener built with it
   present trusts your local key, and shipping that asks every user's machine to
   trust it too. `xtask release` prints a warning whenever `dev.pub` exists.
-- The release build should be signed with the release key and `keys/gacasy.pub`
+- The release build should be signed with the release key and `keys/romzeta.pub`
   should be the only anchor compiled in.
 - `xtask release` verifies everything it just signed before declaring success.
   That is not ceremony: it is the only thing that proves the secret key in use

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! Turning a volume into a cartridge — jobs 1 and 3, which are the same write.
@@ -301,7 +301,8 @@ fn remove_entry(root: &Path, entry: &Entry) -> Result<(), String> {
     if let Some(dir) = catalog::game_dir(root, entry)
         && dir.is_dir()
     {
-        fs::remove_dir_all(&dir).map_err(|e| format!("{} could not be removed: {e}", dir.display()))?;
+        fs::remove_dir_all(&dir)
+            .map_err(|e| format!("{} could not be removed: {e}", dir.display()))?;
     }
     if let Some(cover) = catalog::image_file(root, entry)
         && cover.is_file()

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! `catalog.json` — the game list, as the launcher deserializes it.
@@ -56,7 +56,8 @@ pub fn read(root: &Path) -> Result<Vec<Entry>, String> {
     if json.trim().is_empty() {
         return Ok(Vec::new());
     }
-    serde_json::from_str(&json).map_err(|e| format!("{} is not a valid catalog: {e}", path.display()))
+    serde_json::from_str(&json)
+        .map_err(|e| format!("{} is not a valid catalog: {e}", path.display()))
 }
 
 /// Writes the catalog, pretty-printed — it is a file people open and edit by
@@ -114,11 +115,7 @@ pub fn slug(name: &str) -> String {
         }
     }
     let slug = slug.trim_matches('_').to_string();
-    if slug.is_empty() {
-        "game".into()
-    } else {
-        slug
-    }
+    if slug.is_empty() { "game".into() } else { slug }
 }
 
 /// `slug`, with a numeric suffix if that name is already taken on the cartridge.

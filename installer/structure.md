@@ -1,6 +1,6 @@
-# GaCaSy Installer — Setup Side (spec to build)
+# Romzeta Installer — Setup Side (spec to build)
 
-Part of the **GaCaSy** game-cartridge system. This document covers the **installer**: the
+Part of the **Romzeta** game-cartridge system. This document covers the **installer**: the
 single file an end user downloads, which turns blank media into a cartridge, installs the
 PC-side listener, and edits cartridges that already exist. The cartridge-side app is
 documented in [`../launcher/structure.md`](../launcher/structure.md), the PC-side service in
@@ -93,7 +93,7 @@ launcher's link step — there is no dependency edge between them, and binary-ar
 dependencies are still unstable — so it is a race that usually goes your way. Two commands
 is cheaper than a flaky one.
 
-`GACASY_PAYLOAD_OPTIONAL=1` builds an installer with empty binary slots, for working on the
+`ROMZETA_PAYLOAD_OPTIONAL=1` builds an installer with empty binary slots, for working on the
 UI without a release build in front of every iteration. That build is not shippable and says
 so: `payload::defect()` puts a red line across the top of every screen and every write
 refuses before it starts.
@@ -130,7 +130,7 @@ What follows from having no elevated path at all:
 
 ### Where the listener lives
 
-`%LOCALAPPDATA%\GaCaSy\` — `listener.exe` and `listener.log`, together.
+`%LOCALAPPDATA%\Romzeta\` — `listener.exe` and `listener.log`, together.
 
 It is the same path `settings::fallback_log_path` in
 [`../listener/src/settings.rs`](../listener/src/settings.rs) already names as the log's home,
@@ -142,8 +142,8 @@ Program Files bought a shared *binary* and nothing else — autostart is `HKCU\�
 wherever the exe sits, so every account that wants the listener registers its own regardless.
 It is not offered.
 
-**Folders earlier builds used** — `%LOCALAPPDATA%\Programs\GaCaSy\` and
-`%ProgramFiles%\GaCaSy\` — are still *looked at*, never written. An install found in one is
+**Folders earlier builds used** — `%LOCALAPPDATA%\Programs\Romzeta\` and
+`%ProgramFiles%\Romzeta\` — are still *looked at*, never written. An install found in one is
 listed on the listener screen and folded in when you install: it is stopped, un-registered
 and deleted. This used to carry that install's trusted keys over first, and that step was the
 delicate part of the whole operation — removing the folder without them would silently
@@ -349,13 +349,13 @@ different process lifetimes (see
 [Execution models](../listener/structure.md#execution-models)), so "make it run" means two
 unrelated things:
 
-1. Copy the embedded listener binary into place: **`%LOCALAPPDATA%\GaCaSy\listener.exe`**,
+1. Copy the embedded listener binary into place: **`%LOCALAPPDATA%\Romzeta\listener.exe`**,
    the only location, alongside the config and log it writes. There is no choice to make and
    no elevation — see [Elevation](#elevation).
-   > The original spec said `C:\Program Files\GaCaSy\` and named the problem with it in the
+   > The original spec said `C:\Program Files\Romzeta\` and named the problem with it in the
    > same breath: the listener keeps its exe, config and log in one folder, and Program Files
    > is the one location where that can't hold — the user it runs as can't write there, so
-   > its log falls back to `%LOCALAPPDATA%\GaCaSy\listener.log`. Rather than keep a location
+   > its log falls back to `%LOCALAPPDATA%\Romzeta\listener.log`. Rather than keep a location
    > that splits the three files up, the install *is* that folder.
 
    A listener that is already running holds its own exe open, so an update or repair stops
@@ -371,7 +371,7 @@ unrelated things:
 3. **Make it run — per OS:**
    - **Windows (v1)** — the listener is a **resident** process, so register it to start at
      login: an `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` entry named
-     `GaCaSy Listener`, holding the **quoted** exe path — `C:\Users\First Last\AppData\…`
+     `Romzeta Listener`, holding the **quoted** exe path — `C:\Users\First Last\AppData\…`
      has a space in it whenever the account name does. Per-user, like the install folder it
      points into. Alternatives worth keeping in mind: `HKLM\…\Run` for all users, or a Task
      Scheduler logon trigger if it ever needs to start elevated.
@@ -380,7 +380,7 @@ unrelated things:
      > failed.
    - **Linux (future)** — there is **nothing to autostart**. The listener is one-shot and udev
      starts it per event, so the installer's whole job is dropping
-     `/etc/udev/rules.d/99-gacasy.rules` and running `udevadm control --reload`. Note the
+     `/etc/udev/rules.d/99-romzeta.rules` and running `udevadm control --reload`. Note the
      elevation shape inverts: this needs **root** for a system-wide rules directory, where
      Windows needs no elevation at all.
 4. **Repair / uninstall:** detect an existing install and offer to replace or remove it,
@@ -420,7 +420,7 @@ stranger's USB stick in order to decide what it was, which is the exact thing
 do, done by the program next door. The version was inside the signature the whole time.
 
 A drive with no launcher, an unsigned one, one signed by a key this build does not carry, and
-a genuine GaCaSy binary that is not a launcher all mean the same thing here — *not a cartridge
+a genuine Romzeta binary that is not a launcher all mean the same thing here — *not a cartridge
 this installer made* — and none of them are worth telling apart on a screen whose next
 question is "create or edit?".
 
@@ -464,7 +464,7 @@ repartitions one.
 
 ## Future
 
-- **Linux target:** `/opt/gacasy` or `~/.local/share/gacasy` instead of Program Files, a
+- **Linux target:** `/opt/romzeta` or `~/.local/share/romzeta` instead of Program Files, a
   **udev rule instead of a Run key**, and a Linux launcher binary instead of `launcher.exe`.
   The Linux listener is *not* a service and has nothing to autostart — it is started by udev
   per connection and exits, so there is no user unit to enable. See
@@ -488,7 +488,7 @@ Signature-based trust used to be the second item here. It shipped — see
 - [x] Cartridge write: threaded `games/` copy with progress + cancel, covers under
       `assets/images/`, catalog, `config.toml`, and the signed `launcher.exe` that is the
       cartridge's whole identity.
-- [x] Listener install into `%LOCALAPPDATA%\GaCaSy` — the only location — and a `Run` entry on
+- [x] Listener install into `%LOCALAPPDATA%\Romzeta` — the only location — and a `Run` entry on
       Windows. Installs left by an earlier build elsewhere are cleared out.
 - [x] Edit mode: add games, remove games, rename, refresh a stale launcher.
 - [x] Free-space precheck and failure/rollback handling.

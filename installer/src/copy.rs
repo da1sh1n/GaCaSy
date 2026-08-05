@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! Moving a game folder onto a cartridge: chunked, measured, and interruptible.
@@ -28,7 +28,10 @@ const CHUNK_BYTES: usize = 1024 * 1024;
 pub enum Error {
     /// The user pressed cancel. Not a failure — the caller unwinds and says so.
     Cancelled,
-    Io { path: PathBuf, source: io::Error },
+    Io {
+        path: PathBuf,
+        source: io::Error,
+    },
 }
 
 impl Error {

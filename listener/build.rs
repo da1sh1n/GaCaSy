@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! Bakes the trusted public keys into `listener.exe`.
@@ -19,7 +19,7 @@
 //!
 //! # The two keys
 //!
-//! `keys/gacasy.pub` is the release key and is committed. `keys/dev.pub` is
+//! `keys/romzeta.pub` is the release key and is committed. `keys/dev.pub` is
 //! whatever `cargo run -p xtask -- keygen` generated on this machine, and is
 //! gitignored. A listener trusts both, which is what makes a clone of this repo
 //! usable: your build accepts your cartridges *and* official ones, while an
@@ -36,11 +36,14 @@ use std::path::PathBuf;
 
 fn main() {
     let manifest = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").expect("set by cargo"));
-    let keys = manifest.parent().expect("listener/ has a parent").join("keys");
+    let keys = manifest
+        .parent()
+        .expect("listener/ has a parent")
+        .join("keys");
     let out = PathBuf::from(std::env::var_os("OUT_DIR").expect("set by cargo"));
 
     let mut anchors = Vec::new();
-    for (name, file) in [("release", "gacasy.pub"), ("dev", "dev.pub")] {
+    for (name, file) in [("release", "romzeta.pub"), ("dev", "dev.pub")] {
         let path = keys.join(file);
         // Rebuild when a key appears, changes or is deleted — including the
         // "appears" case, which is what happens right after `xtask keygen`.
@@ -61,7 +64,7 @@ fn main() {
     if anchors.is_empty() {
         println!(
             "cargo::error=no trusted public key: neither {} nor {} exists.",
-            keys.join("gacasy.pub").display(),
+            keys.join("romzeta.pub").display(),
             keys.join("dev.pub").display()
         );
         println!(
@@ -98,9 +101,10 @@ fn main() {
 fn embed_resources() {
     let mut res = winres::WindowsResource::new();
     res.set_icon("assets/listener.ico");
-    res.set("FileDescription", "GaCaSy Listener");
-    res.set("ProductName", "GaCaSy");
-    res.compile().expect("compile Windows resources (icon, version info)");
+    res.set("FileDescription", "Romzeta Listener");
+    res.set("ProductName", "Romzeta");
+    res.compile()
+        .expect("compile Windows resources (icon, version info)");
 }
 
 #[cfg(not(windows))]

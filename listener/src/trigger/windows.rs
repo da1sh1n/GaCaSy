@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! The Windows trigger: resident, event-driven, 0% CPU while idle.
@@ -32,8 +32,7 @@ use std::ptr;
 use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE, HWND, LPARAM, LRESULT, POINT,
-    WPARAM,
+    CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE, HWND, LPARAM, LRESULT, POINT, WPARAM,
 };
 use windows_sys::Win32::Storage::FileSystem::{GetDriveTypeW, GetLogicalDrives};
 use windows_sys::Win32::System::Diagnostics::Debug::{SEM_FAILCRITICALERRORS, SetErrorMode};
@@ -41,27 +40,27 @@ use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Threading::CreateMutexW;
 use windows_sys::Win32::System::WindowsProgramming::{DRIVE_FIXED, DRIVE_REMOVABLE};
 use windows_sys::Win32::UI::Shell::{
-    NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW, ShellExecuteW,
-    Shell_NotifyIconW,
+    NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW, Shell_NotifyIconW,
+    ShellExecuteW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CW_USEDEFAULT, CreatePopupMenu, CreateWindowExW, DBT_DEVICEARRIVAL,
     DBT_DEVTYP_VOLUME, DBTF_NET, DEV_BROADCAST_HDR, DEV_BROADCAST_VOLUME, DefWindowProcW,
-    DestroyMenu, DestroyWindow, DispatchMessageW, GetCursorPos, GetMessageW, LoadIconW,
-    MF_STRING, MSG, PostQuitMessage, RegisterClassW, SW_SHOWNORMAL, SetForegroundWindow,
-    TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage, WM_APP, WM_CONTEXTMENU,
-    WM_DESTROY, WM_DEVICECHANGE, WM_RBUTTONUP, WNDCLASSW, WS_OVERLAPPED,
+    DestroyMenu, DestroyWindow, DispatchMessageW, GetCursorPos, GetMessageW, LoadIconW, MF_STRING,
+    MSG, PostQuitMessage, RegisterClassW, SW_SHOWNORMAL, SetForegroundWindow, TPM_RETURNCMD,
+    TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage, WM_APP, WM_CONTEXTMENU, WM_DESTROY,
+    WM_DEVICECHANGE, WM_RBUTTONUP, WNDCLASSW, WS_OVERLAPPED,
 };
 
 use crate::log::Log;
 use crate::{settings, volume};
 
-/// Its own name, distinct from the launcher's `Local\GaCaSy.CartridgeLauncher`.
+/// Its own name, distinct from the launcher's `Local\Romzeta.CartridgeLauncher`.
 /// `Local\` scopes it to the login session, which is the right scope for
 /// something started per user by a `Run` entry.
-const INSTANCE_MUTEX: &str = r"Local\GaCaSy.CartridgeListener";
+const INSTANCE_MUTEX: &str = r"Local\Romzeta.CartridgeListener";
 
-const WINDOW_CLASS: &str = "GaCaSy.ListenerWindow";
+const WINDOW_CLASS: &str = "Romzeta.ListenerWindow";
 
 /// `uID` `Shell_NotifyIconW` identifies this icon by, alongside `hWnd`. One
 /// tray icon per process, so any constant does — it only has to be stable
@@ -158,7 +157,11 @@ pub fn run(log: Log) {
     // noticed and launched without one — so failing to add it is logged and
     // otherwise ignored rather than treated as a reason to exit.
     if !add_tray_icon(hwnd) {
-        with_state(|state| state.log.line("failed to add the tray icon; continuing without one"));
+        with_state(|state| {
+            state
+                .log
+                .line("failed to add the tray icon; continuing without one")
+        });
     }
 
     // After the window exists, so an arrival that happens mid-sweep is queued
@@ -228,7 +231,7 @@ fn create_hidden_window() -> Option<HWND> {
             return None;
         }
 
-        let title = wide("GaCaSy Listener");
+        let title = wide("Romzeta Listener");
         let hwnd = CreateWindowExW(
             0,
             class_name.as_ptr(),
@@ -311,7 +314,7 @@ fn add_tray_icon(hwnd: HWND) -> bool {
         data.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
         data.uCallbackMessage = WM_TRAYICON;
         data.hIcon = icon;
-        set_tip(&mut data.szTip, "GaCaSy Listener");
+        set_tip(&mut data.szTip, "Romzeta Listener");
 
         Shell_NotifyIconW(NIM_ADD, &data) != 0
     }
@@ -353,7 +356,12 @@ unsafe fn show_tray_menu(hwnd: HWND) {
         }
         let open_log = wide("Open log");
         let exit = wide("Exit");
-        AppendMenuW(menu, MF_STRING, ID_MENU_OPEN_LOG as usize, open_log.as_ptr());
+        AppendMenuW(
+            menu,
+            MF_STRING,
+            ID_MENU_OPEN_LOG as usize,
+            open_log.as_ptr(),
+        );
         AppendMenuW(menu, MF_STRING, ID_MENU_EXIT as usize, exit.as_ptr());
 
         let mut point: POINT = std::mem::zeroed();

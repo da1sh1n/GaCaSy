@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! How big the window is, and where it sits.
@@ -152,7 +152,11 @@ pub fn round_corners(window: &tao::window::Window, radius: f64) {
     unsafe {
         // Windows 11 first. S_OK (>= 0) means it took, and there is nothing
         // left to do — the compositor owns the corners from here.
-        let preference: i32 = if square { DWMWCP_DONOTROUND } else { DWMWCP_ROUND };
+        let preference: i32 = if square {
+            DWMWCP_DONOTROUND
+        } else {
+            DWMWCP_ROUND
+        };
         let asked = DwmSetWindowAttribute(
             hwnd,
             DWMWA_WINDOW_CORNER_PREFERENCE as u32,
@@ -178,7 +182,8 @@ pub fn round_corners(window: &tao::window::Window, radius: f64) {
         // pixels off in each direction.
         let mut window_rect: RECT = std::mem::zeroed();
         let mut client_rect: RECT = std::mem::zeroed();
-        if GetWindowRect(hwnd, &mut window_rect) == 0 || GetClientRect(hwnd, &mut client_rect) == 0 {
+        if GetWindowRect(hwnd, &mut window_rect) == 0 || GetClientRect(hwnd, &mut client_rect) == 0
+        {
             return;
         }
         let mut origin = POINT { x: 0, y: 0 };

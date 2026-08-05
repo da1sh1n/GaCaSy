@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! Wizard state: which screen, and everything the screens read and write.
@@ -18,7 +18,6 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-
 
 use crate::autoplay;
 use crate::cartridge::{self, Plan, PlannedGame};
@@ -413,31 +412,35 @@ impl App {
         let games = plan.add.len();
         let removed = plan.remove.len();
         let renamed = plan.label.clone();
-        self.job = Some(Job::spawn(ctx, "Writing the cartridge", move |cancel, report| {
-            cartridge::apply(&plan, cancel, report).map(|warning| {
-                let mut done = Vec::new();
-                if games > 0 {
-                    done.push(format!("Copied {games} game(s) onto the cartridge"));
-                }
-                if removed > 0 {
-                    done.push(format!("Removed {removed} game(s)"));
-                }
-                done.push("Wrote launcher.exe and catalog.json".into());
-                // The rename is reported whichever way it went: silently
-                // dropping a name the user typed is the one outcome they would
-                // not find out about until they looked at the drive.
-                match (&renamed, warning) {
-                    (_, Some(problem)) => done.push(problem),
-                    (Some(name), None) if name.is_empty() => {
-                        done.push("Cleared the drive's name".into())
+        self.job = Some(Job::spawn(
+            ctx,
+            "Writing the cartridge",
+            move |cancel, report| {
+                cartridge::apply(&plan, cancel, report).map(|warning| {
+                    let mut done = Vec::new();
+                    if games > 0 {
+                        done.push(format!("Copied {games} game(s) onto the cartridge"));
                     }
-                    (Some(name), None) => done.push(format!("Named the drive {name}")),
-                    (None, None) => {}
-                }
-                done.push("Plug it into a PC running the listener to try it".into());
-                done
-            })
-        }));
+                    if removed > 0 {
+                        done.push(format!("Removed {removed} game(s)"));
+                    }
+                    done.push("Wrote launcher.exe and catalog.json".into());
+                    // The rename is reported whichever way it went: silently
+                    // dropping a name the user typed is the one outcome they would
+                    // not find out about until they looked at the drive.
+                    match (&renamed, warning) {
+                        (_, Some(problem)) => done.push(problem),
+                        (Some(name), None) if name.is_empty() => {
+                            done.push("Cleared the drive's name".into())
+                        }
+                        (Some(name), None) => done.push(format!("Named the drive {name}")),
+                        (None, None) => {}
+                    }
+                    done.push("Plug it into a PC running the listener to try it".into());
+                    done
+                })
+            },
+        ));
         self.screen = Screen::Working;
     }
 

@@ -1,4 +1,4 @@
-# GaCaSy Listener — TODO
+# Romzeta Listener — TODO
 
 Actionable list for the service specced in [`structure.md`](structure.md).
 **The shared core and the Windows trigger are built and verified on real hardware; Linux is

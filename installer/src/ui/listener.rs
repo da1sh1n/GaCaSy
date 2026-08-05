@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! Job 2 — the PC side, on its own screen because it is independent of the
@@ -9,7 +9,7 @@
 //! that happen to be shipped in one exe.
 //!
 //! There is **no choice of location** and no elevation on this screen: the
-//! listener lives in `%LOCALAPPDATA%\GaCaSy` with its config and its log, and
+//! listener lives in `%LOCALAPPDATA%\Romzeta` with its config and its log, and
 //! that is the whole of it. The path is still shown, because the one thing a
 //! user needs from a program with no window is to know where to look.
 //!
@@ -19,7 +19,6 @@
 //! the installer *tightening* something that starts open — not opening something
 //! that starts shut. A user who skips the key field should know which of those
 //! they just did.
-
 
 use crate::app::App;
 use crate::autoplay;
@@ -33,10 +32,7 @@ pub fn screen(app: &mut App, ui: &mut egui::Ui) {
     installed(app, ui);
     ui.separator();
 
-    let installed_here = app
-        .listener_installs
-        .iter()
-        .any(|install| !install.legacy);
+    let installed_here = app.listener_installs.iter().any(|install| !install.legacy);
     ui.label(
         egui::RichText::new(if installed_here {
             "Repair or update"
@@ -96,7 +92,7 @@ pub fn screen(app: &mut App, ui: &mut egui::Ui) {
     // starting the launcher is not enough on its own if Windows opens an
     // Explorer window over it a moment later, which is what most PCs are set to
     // do. Spelled out rather than done quietly because it is the one setting
-    // this installer changes that is not GaCaSy's own — see ../autoplay.rs.
+    // this installer changes that is not Romzeta's own — see ../autoplay.rs.
     let already = autoplay::suppressed();
     ui.add_enabled_ui(!already, |ui| {
         let mut ticked = app.suppress_autoplay || already;

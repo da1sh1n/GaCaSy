@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-// GaCaSy installer — the only file a user has to obtain.
+// Romzeta installer — the only file a user has to obtain.
 //
 // Everything else in the system is placed by this program: `launcher.exe` on
 // the cartridge, `listener.exe` on the PC, and the config and catalog files
@@ -55,7 +55,7 @@
 //
 // It asks for **no elevation**, and carries no code that could. Writing a
 // cartridge never needed it, and the listener has exactly one home —
-// %LOCALAPPDATA%\GaCaSy, alongside its log — which the user can always write.
+// %LOCALAPPDATA%\Romzeta, alongside its log — which the user can always write.
 // See listener.rs for why that differs from structure.md's first draft, which
 // specced Program Files.
 //

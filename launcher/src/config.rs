@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! Reading `config.toml`, and the three keys the launcher writes back to it.
@@ -143,14 +143,29 @@ pub fn load(base_dir: &Path) -> Config {
     set_color(&mut config.accent_color, table.get("accent_color"));
     set_f64(&mut config.shadow_size, table.get("shadow_size"));
     set_f64(&mut config.shadow_fade, table.get("shadow_fade"));
-    set_color(&mut config.error_border_color, table.get("error_border_color"));
-    set_f64(&mut config.error_border_width, table.get("error_border_width"));
+    set_color(
+        &mut config.error_border_color,
+        table.get("error_border_color"),
+    );
+    set_f64(
+        &mut config.error_border_width,
+        table.get("error_border_width"),
+    );
     set_color(&mut config.error_text_color, table.get("error_text_color"));
-    set_color(&mut config.missing_sign_color, table.get("missing_sign_color"));
+    set_color(
+        &mut config.missing_sign_color,
+        table.get("missing_sign_color"),
+    );
     set_f64(&mut config.missing_dim, table.get("missing_dim"));
     set_color(&mut config.overlay_color, table.get("overlay_color"));
-    set_color(&mut config.loading_ring_color, table.get("loading_ring_color"));
-    set_color(&mut config.loading_text_color, table.get("loading_text_color"));
+    set_color(
+        &mut config.loading_ring_color,
+        table.get("loading_ring_color"),
+    );
+    set_color(
+        &mut config.loading_text_color,
+        table.get("loading_text_color"),
+    );
     set_f64(&mut config.loading_text_gap, table.get("loading_text_gap"));
     set_color(&mut config.toolbar_color, table.get("toolbar_color"));
     set_color(&mut config.scrollbar_color, table.get("scrollbar_color"));
@@ -246,7 +261,10 @@ pub fn ids(list: &[usize]) -> toml_edit::Value {
 pub fn store(base_dir: &Path, key: &str, value: toml_edit::Value) {
     let path = base_dir.join("config.toml");
     let Ok(contents) = fs::read_to_string(&path) else {
-        log::line(base_dir, &format!("could not read config.toml to set {key}"));
+        log::line(
+            base_dir,
+            &format!("could not read config.toml to set {key}"),
+        );
         return;
     };
     let Ok(mut doc) = contents.parse::<toml_edit::DocumentMut>() else {
@@ -278,7 +296,10 @@ pub fn store(base_dir: &Path, key: &str, value: toml_edit::Value) {
     }
 
     if let Err(error) = fs::write(&path, doc.to_string()) {
-        log::line(base_dir, &format!("could not write {key} to config.toml: {error}"));
+        log::line(
+            base_dir,
+            &format!("could not write {key} to config.toml: {error}"),
+        );
     }
 }
 

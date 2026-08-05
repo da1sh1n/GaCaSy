@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! The worker thread, and how the UI hears from it.
@@ -96,7 +96,8 @@ impl Job {
         loop {
             match self.updates.try_recv() {
                 Ok(Update::Progress(progress)) => {
-                    self.fraction = Some((progress.done as f64 / progress.total.max(1) as f64) as f32);
+                    self.fraction =
+                        Some((progress.done as f64 / progress.total.max(1) as f64) as f32);
                     self.label = progress.label;
                 }
                 Ok(Update::Done(result)) => self.outcome = Some(result),

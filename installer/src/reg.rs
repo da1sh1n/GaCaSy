@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! The bit of the registry API this installer actually uses.
@@ -143,7 +143,10 @@ pub fn query_sz(key: &Key, name: Option<&str>) -> Option<String> {
     // A REG_SZ is *usually* terminated in the hive and occasionally isn't, so
     // the terminator is a stopping point rather than something to rely on.
     let chars = (size as usize / 2).min(buffer.len());
-    let end = buffer[..chars].iter().position(|c| *c == 0).unwrap_or(chars);
+    let end = buffer[..chars]
+        .iter()
+        .position(|c| *c == 0)
+        .unwrap_or(chars);
     Some(String::from_utf16_lossy(&buffer[..end]))
 }
 

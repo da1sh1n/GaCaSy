@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! `x.y.z` — this listener's own, and a launcher's as its signature states it.
 //!
-//! **x is shared by every GaCaSy program** and means "the way these programs
+//! **x is shared by every Romzeta program** and means "the way these programs
 //! talk to each other"; y and z belong to each program alone. Two programs are
 //! compatible when their x matches, which is a thing the listener can actually
 //! check before handing control to a cartridge built against a different
@@ -27,7 +27,7 @@
 //!
 //! # Why the output is bare
 //!
-//! Every GaCaSy exe prints exactly `x.y.z` and nothing else — no program name,
+//! Every Romzeta exe prints exactly `x.y.z` and nothing else — no program name,
 //! no prefix. It is one line for a human and one line to parse, and the two
 //! having the same shape is what keeps them from drifting apart.
 

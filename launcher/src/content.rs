@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! Where the cartridge's content lives, and putting it there on first run.
@@ -124,7 +124,11 @@ fn mirror_seed_config(base: &Path) {
     }
 
     crate::config::store(base, "order_mode", carried.order_mode.into());
-    crate::config::store(base, "usage_order", crate::config::ids(&carried.usage_order));
+    crate::config::store(
+        base,
+        "usage_order",
+        crate::config::ids(&carried.usage_order),
+    );
     crate::config::store(base, "user_order", crate::config::ids(&carried.user_order));
 }
 

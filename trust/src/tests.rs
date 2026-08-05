@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 da1sh1n
-// This file is part of GaCaSy, licensed under the GNU General Public License
-// v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
+// This file is part of Romzeta, licensed under the GNU General Public License
+// v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
 //! Every test in this crate.
@@ -53,7 +53,7 @@ fn signed_by(key: &Key, trusted: &str) -> Vec<u8> {
         &key.secret,
         EXE,
         Some(trusted),
-        Some("signature from gacasy"),
+        Some("signature from romzeta"),
     )
     .expect("sign")
     .into_string();
@@ -70,11 +70,11 @@ fn anchors(key: &Key) -> Vec<Anchor<'_>> {
 #[test]
 fn a_signed_launcher_is_attested() {
     let key = a_key();
-    let signed = signed_by(&key, "gacasy-launcher 0.2.1 2026-07-30");
+    let signed = signed_by(&key, "romzeta-launcher 0.2.1 2026-07-30");
 
     let attested = attest(&signed, &anchors(&key), LAUNCHER_ROLE).expect("attested");
     assert_eq!(attested.anchor, "dev");
-    assert_eq!(attested.role, "gacasy-launcher");
+    assert_eq!(attested.role, "romzeta-launcher");
     assert_eq!(attested.version, "0.2.1");
 }
 
@@ -84,7 +84,7 @@ fn a_signed_installer_is_not_a_launcher() {
     // key, so "signed by us" was never the same question as "is a launcher" —
     // and renaming installer.exe to launcher.exe used to be enough.
     let key = a_key();
-    let signed = signed_by(&key, "gacasy-installer 0.4.0 2026-07-30");
+    let signed = signed_by(&key, "romzeta-installer 0.4.0 2026-07-30");
 
     assert_eq!(
         attest(&signed, &anchors(&key), LAUNCHER_ROLE),
@@ -117,7 +117,7 @@ fn a_block_that_is_not_a_signature_is_malformed() {
 #[test]
 fn a_flipped_payload_byte_is_refused() {
     let key = a_key();
-    let mut signed = signed_by(&key, "gacasy-launcher 0.2.1 2026-07-30");
+    let mut signed = signed_by(&key, "romzeta-launcher 0.2.1 2026-07-30");
     signed[1] ^= 0xff;
 
     assert_eq!(
@@ -131,7 +131,7 @@ fn a_stranger_key_is_refused() {
     let ours = a_key();
     let theirs = a_key();
     // Signed correctly, with a role that would otherwise be exactly right.
-    let signed = signed_by(&theirs, "gacasy-launcher 0.2.1 2026-07-30");
+    let signed = signed_by(&theirs, "romzeta-launcher 0.2.1 2026-07-30");
 
     assert_eq!(
         attest(&signed, &anchors(&ours), LAUNCHER_ROLE),
@@ -147,7 +147,7 @@ fn the_trusted_comment_cannot_be_edited_after_signing() {
     // reading the comment is reading attacker-controlled text and `attest` is
     // worthless.
     let key = a_key();
-    let signed = signed_by(&key, "gacasy-launcher 0.2.1 2026-07-30");
+    let signed = signed_by(&key, "romzeta-launcher 0.2.1 2026-07-30");
     assert!(attest(&signed, &anchors(&key), LAUNCHER_ROLE).is_ok());
 
     // Edit the comment inside the signature block and put the file back
@@ -155,7 +155,7 @@ fn the_trusted_comment_cannot_be_edited_after_signing() {
     // length, so nothing shifts.
     let (payload, signature) = sigblock::split(&signed);
     let signature = signature.expect("the fixture is signed");
-    let edited = signature.replace("gacasy-launcher 0.2.1", "gacasy-launcher 9.9.9");
+    let edited = signature.replace("romzeta-launcher 0.2.1", "romzeta-launcher 9.9.9");
     assert_ne!(edited, signature, "the fixture did not contain the comment");
     let tampered = sigblock::attach(payload, &edited);
 
@@ -172,7 +172,7 @@ fn the_role_is_not_consulted_before_the_signature() {
     // mean the comment had been read and believed on an unverified file.
     let ours = a_key();
     let theirs = a_key();
-    let signed = signed_by(&theirs, "gacasy-installer 0.4.0 2026-07-30");
+    let signed = signed_by(&theirs, "romzeta-installer 0.4.0 2026-07-30");
 
     assert_eq!(
         attest(&signed, &anchors(&ours), LAUNCHER_ROLE),
@@ -186,7 +186,7 @@ fn no_anchors_means_nothing_is_trusted() {
     // anything. Both build scripts make this a build error; this makes sure the
     // runtime answer is the safe one regardless.
     let key = a_key();
-    let signed = signed_by(&key, "gacasy-launcher 0.2.1 2026-07-30");
+    let signed = signed_by(&key, "romzeta-launcher 0.2.1 2026-07-30");
 
     assert_eq!(attest(&signed, &[], LAUNCHER_ROLE), Err(Refusal::Untrusted));
 }
