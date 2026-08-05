@@ -1,179 +1,78 @@
-# Cartridge Launcher config (TOML).
+# Cartridge Launcher config.
 #
-# In the repo, launcher/src/config.toml is the master: every `cargo run`
-# copies it over output/config.toml, so edit it in src/ — changes made to the
-# copy in output/ are overwritten on the next run.
+#   *_color                            hex, #rrggbb or #rrggbbaa
+#   *_gap, *_size, *_width, *_radius   pixels
+#   *_dim, *_opacity                   0 to 1
 #
-# On a real cartridge there is no src/, and this file is written once if
-# missing and never touched again: whoever owns the cartridge owns its config.
-# There are two exceptions:
-#
-#   - a setting that didn't exist when the file was first written — the launcher
-#     appends a commented-out line for it (already at its default) so it's there
-#     to find and uncomment, instead of silently applying with no trace of it in
-#     the file.
-#   - the three order_* settings at the bottom, which the launcher writes as
-#     games are played and covers arranged. They are yours to edit too; the
-#     launcher just keeps them current between edits. Everything else here it
-#     only ever reads. (This split holds in the repo as well: `cargo run`
-#     rewrites output/config.toml from this file but carries those three keys
-#     across, so a dev session doesn't forget what you last played.)
-#
-# The window wraps the covers: each cover is shown at the size the art was drawn
-# at (600x900), and the window is sized around a row of them. It only shrinks
-# them when your display can't hold three at that size. How many games there are
-# decides how WIDE the window is — never how big a cover is — between a floor of
-# three covers and whatever fits your screen; past that the row scrolls sideways
-# and a search box appears. The caps and that floor live in src/constants.rs
-# (MAX_WIDTH_FRACTION, MAX_HEIGHT_FRACTION, MIN_VISIBLE_COVERS), together with
-# every other number this file doesn't expose.
+# A blank color is derived from the palette. Bad or missing values fall back to the default.
 
-# Show the selected game's name, on one shared line under the row. One line
-# rather than a label per cover: a name under all thirty is noise, and the
-# only name worth reading is the one you are pointing at.
+# Show the selected game's name on one line under the row.
 show_captions = true
 
-# ── Look and feel ──────────────────────────────────────────────────────────
-# All sizes are in pixels; colors are quoted strings holding any CSS color
-# (hex like "#1b1229", or "rgba(...)" for translucency). Missing or invalid
-# values fall back to the defaults shown here.
-
-# Empty space between the window edge and the covers, on all four sides. The
-# covers sit exactly this far from every edge, which is what makes the row's box
-# symmetric in the window.
-#
-# The top and bottom margins have a job beyond breathing room: the toolbar sits
-# inside the top one and the selected game's name and the scroll bar inside the
-# bottom one. They take a fixed 30px and 42px respectively, so this number is
-# what is left over as air — below about 42 the name line starts to sit on the
-# covers.
+# Space from the window edge to the covers (42 or more), and between covers.
 border_gap = 56
-
-# Gap between adjacent covers.
 image_gap = 32
 
-# How rounded each cover's corners are (0 = square).
+# 0 = square. The window's is ignored on Windows 11, which rounds its own.
 corner_radius = 14
-
-# How rounded the window's own corners are (0 = square).
-#
-# On Windows 11 the corners are the system's own and this number is ignored —
-# the compositor rounds the window and picks the radius, which is what makes the
-# launcher match every other window on that machine. On Windows 10, which has no
-# such setting, the launcher clips the window to this radius itself; the corner
-# is a touch stair-stepped there, because the clip has no partial pixels.
 window_corner_radius = 12
 
-# ── The palette ────────────────────────────────────────────────────────────
-# Three colors, in the proportions the 60/30/10 rule is named for. Between them
-# they carry the whole launcher: everything that is not cover art, and not one
-# of the two warning colors further down, is one of these or a shade worked out
-# from them.
-#
+# Everything that isn't cover art is one of these or derived from it.
 #   primary    60%  the window behind everything
-#   secondary  30%  the shadow under each cover, control outlines, and the
-#                   plate that shows when a cover's art is missing
+#   secondary  30%  cover shadows, control outlines, missing-art plate
 #   accent     10%  text, the selected cover, the close button
-#
-# Two of those shades are not the color exactly as you set it, and it is worth
-# knowing why before you wonder where the difference came from. An accent picked
-# to look right filling the close button is usually too close to the primary to
-# read as small text on it; a secondary picked to look right as a shadow is
-# usually too close to show up as a hairline. So each gets lifted just far
-# enough to clear that bar and no further — same hue, enough contrast. Pick
-# three colors you like and the rest follows.
 primary_color = "#191325"
 secondary_color = "#3D1F37"
 accent_color = "#925E37"
 
-# Shadow around each cover, in secondary_color. It never reaches further than
-# shadow_size.
-#   shadow_size — how far the shadow reaches out from the cover edge.
-#   shadow_fade — solid color for this many px from the edge, then it fades
-#                 smoothly to nothing by shadow_size (0 = fades the whole way;
-#                 must be <= shadow_size).
+# How far the cover shadow reaches, and how much of it is solid before it fades.
 shadow_size = 28
 shadow_fade = 2
 
-# The toolbar across the top — the order control, the arrange toggle, and the
-# search box that appears once there are more covers than fit — and the bar
-# under a row too long to fit at once.
-#
-# Both blank, meaning "take it from the palette above". Naming a color here
-# overrides that, but a color that suits one palette rarely suits another, so
-# it is worth changing the three above first and seeing whether you still want
-# to.
+# Toolbar text and outlines; the scroll bar under a too-long row.
 toolbar_color = ""
 scrollbar_color = ""
 
-# ── Launching ──────────────────────────────────────────────────────────────
-# What the player sees when a game is chosen, and when one can't start. Full
-# details of any failure are written to logs/launcher.log, and each game's own
-# console output to logs/<game>/out.log and err.log.
+# The cursor ring. Blank switches white/black against the art under it.
+cursor_color = ""
 
-# Screen darkening while the chosen game starts up. It covers everything,
-# the centred cover included. Use the rgba alpha to set how dark it gets.
-overlay_color = "rgba(0, 0, 0, 0.45)"
+#   simple     nothing moves
+#   particles  glowing hexagons spiraling out from the center
+#   fog        soft plumes drifting upward
+background_effect = "particles"
+background_effect_color = ""
 
-# The progress line that runs under the cover of a game that's starting, and
-# the line of text below it naming what that game is.
-#
-# Blank takes both from the palette. loading_ring_color is named for the
-# spinning ring this used to be; the name is kept so that a cartridge which
-# already sets it keeps its color rather than silently reverting on an update.
+# The covers you aren't pointing at. 1 = solid.
+cover_opacity = 0.9
+
+# Screen dimming while a game starts.
+overlay_color = "#00000045"
+
+# The progress line under a starting cover, the status text below it, and the
+# gap between the two.
 loading_ring_color = ""
 loading_text_color = ""
-
-# Pixels between the progress line and the line of text under it.
 loading_text_gap = 12
 
-# A game that was chosen but failed to start: its cover keeps this border and
-# a short message appears under it. It stays clickable, so choosing it again
-# retries.
+# A cover that was chosen but failed to start.
 error_border_color = "#e0b13a"
 error_border_width = 3
 error_text_color = "#e0b13a"
 
-# A game whose exe isn't on the cartridge at all. Its cover is dimmed to
-# missing_dim (1 = untouched, 0 = black) and marked with a sign in
-# missing_sign_color; it can't be chosen.
+# A game whose exe isn't on the cartridge. 1 = untouched.
 missing_sign_color = "#d13a3a"
 missing_dim = 0.45
 
-# A console-mode game (or a windowless stand-in cover) normally pops its own
-# console window up when it starts. Off by default so that stays hidden; a
-# real GUI game is unaffected either way, since it has no console to begin
-# with.
+# The console window a console-mode game would open.
 show_console_window = false
 
-# ── Cover order ────────────────────────────────────────────────────────────
-# The three settings the launcher writes as well as reads. Change them here or
-# from the toolbar in the launcher itself — either way this file is what's true.
-
-# How the covers are ordered:
-#   "usage"      — most recently played first, from usage_order below
+# How the covers are ordered; anything else falls back to "usage".
+#   "usage"      — most recently played first, from usage_order
 #   "alphabetic" — by name, A→Z
 #   "catalog"    — the order they appear in catalog.json
-#   "user"       — the order in user_order below
-# Anything else falls back to "usage". The order control at the left of the
-# toolbar sets this, and writes it back here.
+#   "user"       — the order in user_order
 order_mode = "usage"
 
-# The two orders, as lists of ids. An id is a game's place in catalog.json —
-# 0 is the first entry, 1 the second, and so on. (If the launcher has refused an
-# entry for naming a file outside the cartridge, it is not counted; check
-# logs/launcher.log if the ids look off by one.)
-#
-# Neither list has to be complete or tidy. Ids that don't exist are ignored,
-# repeats are dropped, and any game the list doesn't mention goes at the end in
-# catalog order — so adding a game to the cartridge doesn't invalidate either
-# list, and `usage_order = [2]` simply means "number 2 first, then the rest".
-
-# Most recently played first. The launcher rewrites this each time a game
-# actually starts; a game that fails to start doesn't move.
+# catalog.json indices. usage_order is launcher-written; user_order is yours.
 usage_order = []
-
-# Hand-arranged order, used when order_mode = "user". Set it here, or switch the
-# launcher to "user" and press the toggle beside the order control to drag the
-# covers around by the grip that appears on each one.
 user_order = []
