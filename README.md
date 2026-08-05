@@ -26,10 +26,10 @@ GaCaSy is made of three apps:
   you plug something in. *(Windows build works; Linux not started.)*
 - **Installer** — the one file you download. It turns blank media into a cartridge,
   installs the listener, and edits cartridges you already made. Everything else is carried
-  inside it: no downloads, no prerequisites. *(Built; not yet tried on real media.)*
+  inside it: no downloads, no prerequisites. *(Built and tried on real media.)*
 
-All three build and run on Windows. The manual setup below still works and is still the
-documented path until the installer has been through an end-to-end run on a real drive.
+All three build and run on Windows. The manual setup below still works and is documented as
+the alternative to the installer.
 
 > Developers: each app documents itself — [launcher/structure.md](launcher/structure.md)
 > (cartridge side), [listener/structure.md](listener/structure.md) (PC side), and
@@ -66,18 +66,18 @@ GaCaSy/
       config.toml      settings   (seeded from src/)
   listener/          The PC-side app (Windows built, Linux not started)
     src/
-      main.rs        Entry point and --check handling
-      volume.rs      The shared core: marker, trust check, launch
-      marker.rs      Reading a cartridge's .cartridge file
-      config.rs      Reading the listener's own config.toml
+      main.rs        Entry point, --check and --signature handling
+      volume.rs      The shared core: verify, then launch
+      trust.rs       Which file to check, holding it still, and saying why not
+      version.rs     x.y.z — its own, and a launcher's per its signature
+      settings.rs    The fixed tunables and where the log goes
       log.rs         The activity log
-      config.toml    Seed config, embedded in the exe
       trigger/       The only per-OS part
         windows.rs   Resident: hidden window + WM_DEVICECHANGE
         linux.rs     One-shot udev handoff — placeholder, not built
+    build.rs         Bakes keys/*.pub in as the keys it trusts
     output/          The deployed listener — what you actually run
       listener.exe   The program
-      config.toml    Trusted keys  (seeded from src/; empty = trust all)
       listener.log   What it did, and why it ignored what it ignored
     README.md        What the listener is, in short
     structure.md     Spec for the PC-side listener — including the two
@@ -90,12 +90,13 @@ GaCaSy/
       app.rs         Wizard state and the create-vs-edit routing rule
       ui/            The screens; ui/mod.rs is the shell and the footer
       payload.rs     The embedded launcher, listener and seed files
-      cartridge.rs   The write: copy, catalog, config, launcher, marker
-      listener.rs    Job 2 — install folder, key merge, Run entry
+      cartridge.rs   The write: copy, catalog, config, launcher
+      listener.rs    Job 2 — install folder, Run entry, uninstall
       detect.rs      Finding a game's exe, and measuring the folder
       volume.rs      Which drives can be cartridges, and which already are
+                     (by verifying the launcher, never by running it)
       copy.rs        The cancellable, measured file copy
-      catalog.rs / marker.rs / image.rs / key.rs / work.rs
+      catalog.rs / image.rs / version.rs / work.rs
     structure.md     Reference for the setup side
     TODO.md          What's left — chiefly a run on real media
   Cargo.toml         Workspace tying the three crates together
@@ -139,33 +140,30 @@ background, on Linux it isn't running at all until the system wakes it on connec
 
 Until the installer ships, setting it up is manual:
 
-1. `cd listener && cargo run --release -- --check .` — builds it, fills in
-   `listener/output/` with `listener.exe` and a `config.toml` (the same way the launcher's
-   `output/` works), and exits.
-2. Put a `.cartridge` file at the root of the cartridge:
-
-   ```toml
-   version = 1
-   key = "pick-any-string"
-   launcher = "launcher.exe"
-   ```
-
-3. Run `output\listener.exe`. It stays in the background — no window, no tray icon — and
+1. `cargo run -p xtask -- keygen` — once, if you have never built this tree. It writes
+   `keys/dev.pub`, which the listener compiles in as a key it trusts. Without it the listener
+   does not build at all: a listener with nothing to trust would accept nothing.
+2. `cargo run -p xtask -- release` — builds the launcher and the listener and **signs** them.
+   The signature is what makes a drive a cartridge, so an unsigned launcher is ignored.
+3. `cd listener && cargo run --release -- --check .` — fills in `listener/output/` with
+   `listener.exe` and exits.
+4. Copy the signed `launcher.exe` to the root of the drive, with its `catalog.json`,
+   `config.toml`, `games/` and `assets/images/` beside it.
+5. Run `output\listener.exe`. It stays in the background — no window, no tray icon — and
    starts the launcher when you plug the cartridge in. `output\listener.log`, right beside
    it, says what it did.
 
-Out of the box the listener trusts **every** cartridge, so step 2 is all the pairing there
-is. To restrict it to your own, list their keys in `output\config.toml`:
-
-```toml
-keys = ["pick-any-string"]
-```
+There is nothing to pair. The listener accepts a cartridge when the `launcher.exe` at its root
+carries a signature from a key that listener was built with, and refuses everything else — so
+a drive with a launcher you did not sign does nothing, and there is no list anywhere to keep
+in step.
 
 `listener.exe --check E:\` answers "would this cartridge launch?" without plugging anything
-in. See [listener/README.md](listener/README.md) and
-[listener/structure.md](listener/structure.md) for the rest.
+in, and `listener.exe --signature` says which keys a given copy trusts. See
+[listener/README.md](listener/README.md), [listener/structure.md](listener/structure.md) and
+[SIGNING.md](SIGNING.md) for the rest.
 
-### The installer — *built, not yet tried on real media*
+### The installer — *built and tried on real media*
 
 The piece that makes all of the above unnecessary: one file that writes the cartridge and
 sets up the listener for you. It carries the launcher, the listener and their seed files

@@ -46,11 +46,12 @@ installer/
     detect.rs     finding the game's exe inside a folder, and measuring it
     image.rs      cover dimensions, for the 2:3 warning
     catalog.rs    catalog.json — the file the launcher reads
-    marker.rs     .cartridge — the file the listener reads
-    cartridge.rs  the write itself: copy, catalog, config, launcher, marker
-    listener.rs   job 2 — install folder, key merge, Run entry, uninstall
+    cartridge.rs  the write itself: copy, catalog, config, launcher
+    listener.rs   job 2 — install folder, Run entry, uninstall
     copy.rs       the cancellable, measured file copy underneath it all
-    key.rs        generating and validating cartridge keys
+    version.rs    x.y.z — its own, and the one a cartridge's signature states
+    autoplay.rs   the Windows AutoRun nudge
+    font.rs, image.rs, clipboard.rs, reg.rs, shell.rs   the small OS errands
 ```
 
 ### Embedded payload
@@ -62,14 +63,18 @@ installer.exe
   ├─ launcher.exe      ← written onto the cartridge
   ├─ listener.exe      ← written into the listener's install folder
   ├─ config.toml       ← cartridge seed, from launcher/src/config.toml
-  ├─ catalog.json      ← cartridge seed, from launcher/src/catalog.json
-  └─ config.toml       ← listener seed, from listener/src/config.toml
+  └─ catalog.json      ← cartridge seed, from launcher/src/catalog.json
 ```
 
-The listener's seed config is carried as well as the cartridge's, and it is not in the
-original list above by accident: pairing a PC *edits* that file's `keys` list, so starting
-from the commented seed the listener ships with is what puts the "an empty list trusts
-everything" paragraph in front of whoever opens it later.
+The listener used to have a seed config carried alongside these, because pairing a PC edited
+its `keys` list. The listener has no config file at all now — trust is compiled into it — so
+there is nothing to seed and nothing to merge.
+
+**Both embedded binaries are checked at build time**: `build.rs` verifies each one's signature
+against `keys/*.pub` *and* that its signature declares the role its slot is for, through the
+same [`../trust/`](../trust/) crate the listener uses at runtime. Getting the sign-then-build
+order wrong would otherwise produce an installer that works, writes a cartridge that looks
+right, and is silently ignored by every listener on earth.
 
 Build-ordering consequence: **launcher and listener must be built `--release` before the
 installer**, which `build.rs` enforces — a missing artifact fails the build with the command
@@ -125,11 +130,11 @@ What follows from having no elevated path at all:
 
 ### Where the listener lives
 
-`%LOCALAPPDATA%\GaCaSy\` — `listener.exe`, its `config.toml` and `listener.log`, together.
+`%LOCALAPPDATA%\GaCaSy\` — `listener.exe` and `listener.log`, together.
 
-It is the same path `config::fallback_log_path` in
-[`../listener/src/config.rs`](../listener/src/config.rs) already named as the log's home, so
-the install folder and the log folder are now one folder rather than two that a paragraph had
+It is the same path `settings::fallback_log_path` in
+[`../listener/src/settings.rs`](../listener/src/settings.rs) already names as the log's home,
+so the install folder and the log folder are one folder rather than two that a paragraph had
 to reconcile. An installed listener never reaches that fallback at all: the primary path and
 the fallback resolve to the same file.
 
@@ -139,23 +144,27 @@ It is not offered.
 
 **Folders earlier builds used** — `%LOCALAPPDATA%\Programs\GaCaSy\` and
 `%ProgramFiles%\GaCaSy\` — are still *looked at*, never written. An install found in one is
-listed on the listener screen and folded in when you install: its trusted keys are carried
-over first, then it is stopped, un-registered and deleted. Carrying the keys is the part that
-matters; removing the folder without them would silently un-pair every cartridge that PC
-knew, which is exactly what the `keys`-is-a-list design exists to prevent. A leftover that
-refuses to delete (a Program Files copy, with no elevation to remove it) is reported and
-stepped over — the new listener works either way, and the stale copy no longer holds the
-login entry.
+listed on the listener screen and folded in when you install: it is stopped, un-registered
+and deleted. This used to carry that install's trusted keys over first, and that step was the
+delicate part of the whole operation — removing the folder without them would silently
+un-pair every cartridge the PC knew. There is nothing to carry now: what a listener trusts is
+compiled into it, so a replacement trusts exactly what the new binary was built to trust. A
+leftover that refuses to delete (a Program Files copy, with no elevation to remove it) is
+reported and stepped over — the new listener works either way, and the stale copy no longer
+holds the login entry.
 
 ## Flow
 
 Which job runs is decided by the target volume:
 
 ```text
-volume picked  →  has .cartridge?  →  yes → edit mode  (add / remove games, change key)
+volume picked  →  launcher.exe we signed?  →  yes → edit mode  (add / remove games, rename)
                         │ no
-                        └─────────→ create mode (key → games → exes → images → copy)
+                        └─────────────────────→ create mode (name → games → exes → images → copy)
 ```
+
+"We signed" is the whole test, and it is made by verifying the file rather than by finding a
+name — see [Is this already a cartridge?](#is-this-already-a-cartridge).
 
 Installing the listener (job 2) is independent of both and can be run on its own.
 
@@ -353,15 +362,12 @@ unrelated things:
    it first — matched on the **full image path**, never on the name `listener.exe`. It has
    no window to close and no IPC to ask through, and nothing to lose by being stopped: its
    only state is its log.
-2. Write its `config.toml` beside it. If one already exists, **append** the new key to its
-   `keys` list rather than overwriting the file — see [Keys](#keys). The append is a
-   *textual* edit of the `keys = […]` value, not a TOML round-trip: serializing the table
-   back out would be shorter and would throw away every comment in the file, including the
-   paragraph explaining that an empty list trusts everything. Note that an *empty*
-   `keys` list means the listener trusts **every** cartridge
-   ([why](../listener/structure.md#an-empty-keys-list-trusts-everything)), so writing the key
-   is what narrows the PC down to the cartridges the user actually made — the installer is
-   tightening a default that starts open, not opening one that starts shut.
+2. There is **no step 2 any more.** This used to write a `config.toml` beside the exe and
+   append the new cartridge's key to its `keys` list — carefully, as a textual edit rather
+   than a TOML round-trip, so the comments explaining the key model survived. The listener has
+   no config file now: what it trusts is compiled in, and a trusted-key list in a writable
+   file beside the exe was precisely the capability the signature exists to deny. Writing the
+   binary *is* installing the trust.
 3. **Make it run — per OS:**
    - **Windows (v1)** — the listener is a **resident** process, so register it to start at
      login: an `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` entry named
@@ -386,35 +392,37 @@ unrelated things:
 
 ## Job 3 — Edit an existing cartridge
 
-When the picked volume already carries a `.cartridge`, read its `config.toml` and
+When the picked volume already carries a launcher this installer can verify, read its
 `catalog.json` and let the user:
 
 - **Add games** — same flow as job 1, steps 3–5, appending to the existing catalog.
 - **Remove games** — delete the game folder and its image, drop the catalog entry.
-- **Change the key** — rewrite `.cartridge`. Nothing else on the cartridge holds the key.
+- **Rename it** — the volume label, see [Naming a cartridge](#naming-a-cartridge).
+- **Refresh its launcher** — offered only when the cartridge's launcher is a different version
+  from the one this installer carries. That version comes out of the file's *signature*, so
+  noticing it costs nothing and asks the binary nothing.
 
-> Changing the key un-pairs the cartridge: any PC whose listener config doesn't know the new
-> key stops auto-launching it until the listener is updated too.
+There is no "change the key" step, because there is no key. A cartridge's identity is the
+signature inside its `launcher.exe`, and the only way to change it is to write a different
+launcher.
 
-## Keys
+### Is this already a cartridge?
 
-The installer does **not** own the identification model — it is a cartridge ↔ PC contract,
-defined in
-[`../listener/structure.md`](../listener/structure.md#cartridge-identification-system). The
-installer is just the tool that writes both halves into place:
+The question that decides create-vs-edit, and the one place the installer makes a trust
+decision of its own: `volume::attested_launcher` reads `<root>/launcher.exe`, verifies it
+against the anchors `build.rs` baked in, and requires the launcher role — the same call the
+listener makes, through the same [`../trust/`](../trust/) crate.
 
-- **Onto the cartridge** — the `.cartridge` marker at the volume root, carrying that
-  cartridge's key.
-- **Onto the PC** — the key, **appended** to the `keys` list in the listener's
-  `config.toml`, so pairing a new cartridge never un-pairs an existing one.
+**Nothing is executed.** The installer used to answer this by looking for a *file name* and
+then running the file with `--version` to see what it was: running an arbitrary binary off a
+stranger's USB stick in order to decide what it was, which is the exact thing
+[`../listener/src/trust.rs`](../listener/src/trust.rs) documents at length that it must never
+do, done by the program next door. The version was inside the signature the whole time.
 
-The cartridge's own `config.toml` holds **no key** — it is look-and-feel only, and the
-launcher has no identity role at all.
-
-What the installer decides is only the user-facing part: the user **chooses the key before
-installation starts**, either typing their own or accepting a generated random one (32 hex
-chars). Reusing one key across several cartridges is fine and expected — that is what makes
-them all work against a single listener install.
+A drive with no launcher, an unsigned one, one signed by a key this build does not carry, and
+a genuine GaCaSy binary that is not a launcher all mean the same thing here — *not a cartridge
+this installer made* — and none of them are worth telling apart on a screen whose next
+question is "create or edit?".
 
 ## Settled questions
 
@@ -461,32 +469,31 @@ repartitions one.
   The Linux listener is *not* a service and has nothing to autostart — it is started by udev
   per connection and exits, so there is no user unit to enable. See
   [`../listener/structure.md`](../listener/structure.md#linux--reactive-one-shot).
-- **v2 trust:** once `launcher.exe` is officially code-signed, the listener verifies the
-  exe's signature instead of a shared key. `.cartridge` is retired, so the installer stops
-  writing markers and stops asking for a key at all — the key screen disappears from the
-  wizard.
+Signature-based trust used to be the second item here. It shipped — see
+[Is this already a cartridge?](#is-this-already-a-cartridge) and
+[`../SIGNING.md`](../SIGNING.md).
 
 ## Status / roadmap
 
 - [x] Root `Cargo.toml` workspace tying `launcher` + `listener` + `installer`.
 - [x] `installer` crate scaffold: `eframe`/`egui`, `windows_subsystem`. **No UAC manifest** —
       see [Elevation](#elevation).
-- [x] Embedded payload + build-time check that every artifact is present.
+- [x] Embedded payload + build-time check that every artifact is present, signed by a key the
+      embedded listener accepts, and signed *as the program its slot is for*.
 - [x] Volume enumeration, **external drives only** (bus type, plus an unconditional
-      system-drive veto), and create-vs-edit routing.
-- [x] Key screen: generate or type, validated, required before install.
+      system-drive veto), and create-vs-edit routing decided by **verifying** the launcher
+      already on the drive rather than by running it.
 - [x] Game folder picker, executable auto-detection, manual override.
 - [x] Per-game cover image picker with the 2:3 warning.
-- [x] Cartridge write: threaded `games/` copy with progress + cancel, images, catalog,
-      `config.toml` (no key), `.cartridge` marker.
-- [x] Listener install into `%LOCALAPPDATA%\GaCaSy` — the only location — key appended to the
-      config's `keys` list, and a `Run` entry on Windows. Installs left by an earlier build
-      elsewhere are carried over and cleared out.
-- [x] Edit mode: add games, remove games, change key.
+- [x] Cartridge write: threaded `games/` copy with progress + cancel, covers under
+      `assets/images/`, catalog, `config.toml`, and the signed `launcher.exe` that is the
+      cartridge's whole identity.
+- [x] Listener install into `%LOCALAPPDATA%\GaCaSy` — the only location — and a `Run` entry on
+      Windows. Installs left by an earlier build elsewhere are cleared out.
+- [x] Edit mode: add games, remove games, rename, refresh a stale launcher.
 - [x] Free-space precheck and failure/rollback handling.
 - [x] Uninstall / repair path.
-- [ ] **Not yet exercised end to end on real media.** Every module has unit tests and the
-      whole wizard builds and runs, but no cartridge has been written to a physical drive and
-      then booted by a listener. That is the next thing to do, and it is the one thing the
-      tests cannot stand in for.
+- [x] **Exercised end to end on real media**: a cartridge written to a physical drive, then
+      unplugged, replugged and booted by an installed listener.
+- [x] Every screen checked visually at the user's real display scale.
 - [ ] Future: Linux target.

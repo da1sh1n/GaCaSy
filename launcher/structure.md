@@ -31,9 +31,11 @@ output/
     EBWebView/     <- WebView2's own data folder (its only on-disk crumbs)
   games/           <- the actual game installs
   logs/            <- launcher.log (every launch attempt) + <game>/out.log, err.log
-  .cartridge       <- identity marker: written by the installer, read by the listener;
-                      the launcher never touches it (design, not yet in code)
 ```
+
+Nothing else. There is no identity file beside these: what makes the volume a cartridge is the
+signature carried **inside `launcher.exe` itself** (see [Role in cartridge
+identification](#role-in-cartridge-identification)).
 
 **`assets/` is not safe to delete, even though half of it is.** `EBWebView/` is
 regenerable browser cache and throwing it away costs nothing; `images/` beside it is
@@ -378,16 +380,24 @@ The launcher has no console, so `logs/` is the only place a failure can be expla
 
 ## Role in cartridge identification
 
-**None today.** The launcher carries no key and writes no marker — it is simply the app the
-listener starts. The identity lives in the `.cartridge` marker at the volume root, written
-by the installer and checked by the listener against its own trusted key list; the full
-contract is in
-[`../listener/structure.md`](../listener/structure.md#cartridge-identification-system).
+**This exe is the identity.** `launcher.exe` carries a minisign signature appended past the
+end of the image (see the [`sigblock`](../sigblock/) crate), and a volume is a cartridge
+exactly when that signature verifies against a key the listener was built to trust *and*
+declares itself a launcher. There is no marker file and no key on the disk; the full contract
+is in [`../listener/structure.md`](../listener/structure.md#trust) and
+[`../SIGNING.md`](../SIGNING.md).
 
-Under **v2** that changes shape rather than coming back: once `launcher.exe` is officially
-code-signed, **the exe's signature becomes the identity**. The listener then verifies the
-binary directly and `.cartridge` is retired — so the launcher's only contribution to trust
-is being a signed binary, never a secret it has to carry.
+The launcher's part in that is entirely passive: it is signed, and it is read. It carries no
+secret, verifies nothing, and is never asked what it is — even its *version* is taken from the
+signed comment rather than by running it with `--version`, so the listener has finished asking
+questions before this program starts.
+
+What is **not** covered by that signature is this program's own input. `catalog.json`,
+`config.toml`, `assets/` and `games/` sit unsigned on the same disk, and nothing could sign
+them, so the launcher treats them as untrusted: `catalog::is_contained` refuses any `exe` or
+`image` path that could escape the cartridge, and `launch::spawn` re-checks before it spawns
+anything. `Path::join` *discards* the base when handed `C:\…` or `\\host\share\…`, so without
+that check a signed, genuine launcher would happily start any executable on the machine.
 
 ## Key source files
 
@@ -411,6 +421,10 @@ is being a signed binary, never a secret it has to carry.
 - [x] Launching: cwd at the exe, waiting for the game's window before closing, the
       launch transition, the missing/failed cover states, and `logs/`. Remaining
       nice-to-haves are in [`TODO.md`](TODO.md).
-- [ ] v2: official code-signing of `launcher.exe`, so the listener verifies the exe's
-      signature and the `.cartridge` marker can be retired entirely. This is the
-      launcher's only remaining identity work.
+- [x] The gallery: one-size covers, horizontal scrolling, four order modes, drag-arrange,
+      search, and the three order keys written back to `config.toml`.
+- [x] Code-signing: the exe's signature is the cartridge's identity, and the `.cartridge`
+      marker is retired. This was the launcher's only remaining identity work.
+- [x] Exercised end to end on real media — see
+      [`../installer/structure.md`](../installer/structure.md#status--roadmap), which owns
+      that item for the whole system.

@@ -30,22 +30,29 @@ costs.
 ```text
 src/
   main.rs      entry point, folder resolution, argument handling
-  volume.rs    the shared core — marker, trust check, launch (used by both OSes)
-  marker.rs    parsing the cartridge's .cartridge file
-  config.rs    parsing this listener's own config.toml
+  volume.rs    the shared core — verify, then launch (used by both OSes)
+  trust.rs     which file to check, holding it still, and saying why not
+  version.rs   x.y.z, its own and a launcher's
+  settings.rs  the fixed tunables and where the log goes
+  alert.rs     the one thing it ever says out loud
   log.rs       the activity log
-  config.toml  the seed written when no config.toml exists yet
   trigger/
     windows.rs  resident: hidden top-level window + GetMessage loop
     linux.rs    one-shot: udev handoff — NOT BUILT YET
 output/        the deployed listener — this is what you ship
   listener.exe
-  config.toml
   listener.log
 ```
 
-`output/` is refreshed by `cargo run`, exactly like the launcher's. `config.toml`
-is never overwritten once present, so an edited key list survives every build.
+`output/` is refreshed by `cargo run`, exactly like the launcher's.
+
+**There is no config file.** There used to be one holding the cartridge keys this
+PC trusted, plus a debounce window and a log path. The key list is gone because
+trust is now cryptographic and compiled in — a list of trusted keys in a writable
+file beside the exe would let anything that could edit it grant itself auto-run on
+every insert, which is the exact capability the signature exists to deny. What
+was left was two tunables nobody has ever needed to change, so the file went with
+them. See [`src/settings.rs`](src/settings.rs).
 
 ## Running it
 
@@ -71,13 +78,11 @@ not this program's — running it by hand does nothing special.
 
 | | |
 | --- | --- |
-| `<exe folder>\config.toml` | the keys this PC trusts, written by the installer |
-| `<exe folder>\listener.log` | the activity log (override with `log_file`) |
-| `<volume>\.cartridge` | the cartridge's marker: `version`, `key`, `launcher` |
+| `<exe folder>\listener.log` | the activity log |
+| `<volume>\launcher.exe` | the only file on a cartridge it reads, and the whole test |
 
-Installed, `<exe folder>` is **`%LOCALAPPDATA%\GaCaSy\`** — the exe, its config
-and its log, one folder, no administrator needed to put them there or to read
-them back.
+Installed, `<exe folder>` is **`%LOCALAPPDATA%\GaCaSy\`** — the exe and its log,
+one folder, no administrator needed to put them there or to read them back.
 
 The log is worth knowing about: the listener has no console and no visible
 window, so it is the only way to see why a cartridge did or didn't launch.
@@ -88,17 +93,28 @@ an install uses, so there is one place to look either way.
 
 ## Trust
 
-`keys = []` in config.toml — the shipped default — **trusts every cartridge**.
-A fresh install works as soon as a volume carries a valid `.cartridge` marker,
-with no pairing step. Listing even one key switches to matching that list and
-nothing else.
+A cartridge is **a volume with a `launcher.exe` at its root carrying a valid
+signature, from a key this listener was built to trust, declaring itself a
+launcher.** No marker file, no key stored on the cartridge, nothing on this PC to
+edit.
 
-So in the default state the marker is the only thing between plugging a disk in
-and running the binary it names. That is a deliberate v1 posture (the key is a
-shared secret anyone who can read a cartridge can copy — a recognition
-handshake, not tamper protection), but it is worth knowing before you leave it
-open. See [Trust](structure.md#an-empty-keys-list-trusts-everything).
+Three things follow, and they are the point of the design:
 
-See [`structure.md`](structure.md) for the full specification, including the
-**Cartridge identification system** — the `.cartridge` key handshake this
-component performs before launching anything.
+- **The file is read, never asked.** A binary that reports its own
+  trustworthiness proves nothing, and to ask you would first have to run the
+  thing you are deciding whether to run. Nothing downstream asks either — a
+  launcher's version comes out of its signature too.
+- **The trust anchor is compiled in.** Changing what a listener accepts means
+  replacing the listener. See [`build.rs`](build.rs), which bakes in `keys/*.pub`.
+- **The signature declares a role.** All three GaCaSy programs are signed with the
+  same key, so "signed by us" is not the same question as "is a launcher" — a
+  genuine `installer.exe` renamed to `launcher.exe` is refused.
+
+`listener.exe --signature` prints this build's own signature and the keys it
+trusts, which is the way to check what a given copy will accept.
+
+The signature covers `launcher.exe`'s own bytes and nothing else on the disk —
+`catalog.json`, `config.toml`, `games/` and `assets/` are unsigned, and the
+launcher treats them as untrusted input. See [`../SIGNING.md`](../SIGNING.md) §1
+for what that does and does not buy, and [`structure.md`](structure.md) for the
+full specification.

@@ -33,8 +33,9 @@ see [Execution models](#execution-models).
   document.
 - Everything downstream of "a volume showed up" is **shared, OS-agnostic code** — one
   implementation of the trust check and the launch, called by both triggers.
-- `#![windows_subsystem = "windows"]`, one dependency (`toml`) plus `windows-sys` on Windows
-  only. Nothing here needs a UI framework.
+- `#![windows_subsystem = "windows"]`, two workspace dependencies (`sigblock`, `trust`) plus
+  `windows-sys` on Windows only. Nothing here needs a UI framework, and on a non-Windows
+  build those two crates are the entire dependency tree — `toml` left with the config file.
 
 ### Deployed layout
 
@@ -44,18 +45,20 @@ The listener keeps its files together in one folder — the same shape as the la
 ```text
 output/
   listener.exe   <- the program
-  config.toml    <- the keys this PC trusts; seeded from src/config.toml if missing
   listener.log   <- what it did, and why it ignored what it ignored
 ```
 
+Two files, and it used to be three: a `config.toml` held the cartridge keys this PC trusted.
+Trust is compiled in now, so there is nothing left for a config file to hold — see
+[Trust](#trust) and [`src/settings.rs`](src/settings.rs).
+
 That folder is simply **wherever the exe is**. Installed, that is
 **`%LOCALAPPDATA%\GaCaSy\`** and nowhere else — the installer has one location and no
-elevated path to any other, chosen precisely so these three files are always together and
+elevated path to any other, chosen precisely so these files are always together and
 always writable ([`../installer/structure.md`](../installer/structure.md#elevation)). It can
 also be `output/`, or anywhere the exe was dropped by hand. The single exception is a
 `cargo run` build, whose exe lives under `target/`: that resolves to the repo's `output/`
 instead, and refreshes `output/listener.exe` so the shippable copy tracks the source.
-`config.toml` is never overwritten once present, so an edited key list survives every build.
 
 The refresh is done by the exe that is *running*, so `cargo build --release` deploys
 nothing — it never runs anything. `cargo run --release -- --check .` deploys the release
@@ -70,24 +73,31 @@ either — the bug noted against `running_deployed()` in
 ### Source layout
 
 The folder split *is* the shape above: `trigger/` is the only `cfg`-gated part, and nothing
-about markers, keys or launching lives inside it.
+about verifying or launching lives inside it.
 
 ```text
 listener/
   Cargo.toml
+  build.rs         <- bakes keys/*.pub in as ANCHORS; no keys, no compile
   src/
-    main.rs        <- entry point, config load, `--check` handling
-    volume.rs      <- THE SHARED CORE: handle_volume(root, config, log)
-    marker.rs      <- reading the cartridge's .cartridge file
-    config.rs      <- reading this listener's own config.toml
+    main.rs        <- entry point, folder resolution, argument handling
+    volume.rs      <- THE SHARED CORE: handle_volume(root, log)
+    trust.rs       <- which file to check, holding it still, and saying why not
+    version.rs     <- x.y.z: its own, and a launcher's as its signature states it
+    settings.rs    <- the fixed tunables and where the log goes
+    alert.rs       <- the one thing it ever says out loud
     log.rs         <- the activity log
-    config.toml    <- seed config, embedded via include_str!
     trigger/
       mod.rs       <- cfg selects one of the two below
       windows.rs   <- resident: hidden top-level window + GetMessage loop
       linux.rs     <- one-shot: udev handoff — placeholder, not built
   output/          <- the deployed listener (see above)
 ```
+
+The decision itself is not in this crate at all: [`../trust/`](../trust/) is a workspace crate
+shared with the installer, which needs the same answer and used to reach a different one.
+What `trust.rs` holds is the part that is about a *volume* — which file to look at, holding it
+still, and saying why not in a way the log can be read back from.
 
 ## What counts as a "cartridge"
 
@@ -101,13 +111,17 @@ Steps 2–5 are the **shared core** — identical on both platforms. Only step 1
 differs a lot; see [Execution models](#execution-models).
 
 1. A **volume becomes available** — however this platform learns about that.
-2. Look for a **`.cartridge`** file at the volume root.
-3. If present, read its **key** and check it against **this listener's own trusted key
-   list** in its `config.toml` (see
-   [Cartridge identification system](#cartridge-identification-system)).
-4. If the key is trusted, **launch that volume's launcher** — the binary the marker's
-   `launcher` field names, resolved relative to the volume root.
-5. Otherwise, ignore the volume (optionally log why).
+2. Look for a **`launcher.exe`** at the volume root, and open it so nothing else can write
+   to or delete it while we decide.
+3. **Verify its signature** against the keys compiled into this build, and require the
+   signature to declare itself a *launcher* (see [Trust](#trust)).
+4. **Read its version out of that same signature** — authenticated, so this costs nothing
+   and asks the binary nothing.
+5. If it verified, **launch it**, still holding the handle from step 2.
+6. Otherwise, ignore the volume and log why.
+
+The order is the security property, not a style choice: nothing is executed at any point
+before the last step.
 
 ## Execution models
 
@@ -148,12 +162,13 @@ trust logic exists exactly once:
 
 ```text
 handle_volume(root: &Path) -> Outcome
-  read <root>/.cartridge  →  parse TOML  →  key in config keys?  →  spawn <root>/<launcher>
+  read <root>/launcher.exe (locked)  →  verify signature + role  →  version from the
+  signed comment  →  spawn it
 ```
 
-That is steps 2–5 of [Responsibilities / flow](#responsibilities--flow) in full. **Do not
-reimplement any of it per platform** — a Windows-only bug in the key check is exactly the
-failure this split is meant to prevent.
+That is steps 2–6 of [Responsibilities / flow](#responsibilities--flow) in full. **Do not
+reimplement any of it per platform** — a Windows-only bug in the signature check is exactly
+the failure this split is meant to prevent.
 
 ### Windows — resident, event-driven
 
@@ -223,103 +238,96 @@ here is the reasoning rather than a re-argument later:
 event-channel dependencies, no AV false positives and no latency. Every one-shot alternative
 trades that for fragility, so Windows stays resident and the asymmetry is accepted.
 
-## Cartridge identification system
+## Trust
 
-The **cartridge ↔ PC** contract, defined here and referenced by the other two docs. It has
-exactly two halves:
+The **cartridge ↔ PC** contract, in exactly one sentence:
 
-- **On the cartridge** — a `.cartridge` marker at the volume root, holding that cartridge's
-  key.
-- **On the PC** — this listener's `config.toml`, holding the list of keys it trusts.
+> A cartridge is a volume with a `launcher.exe` at its root carrying a valid signature, from a
+> key this listener was built to trust, declaring itself a launcher.
 
-A cartridge is trusted when its key appears in that list. The **launcher plays no part**: it
-carries no key and never writes the marker (the installer writes it at setup time), so it is
-purely the thing that gets started.
+No marker file, no key stored on the cartridge, nothing on this PC to edit. There is nothing
+to pair and no state to get into.
 
 ```text
-volume shows up  →  has .cartridge?  →  key in listener's keys?  →  run <volume>/<launcher>
-                          │ no                │ no
-                          └── ignore ─────────┘
+volume shows up  →  launcher.exe at the root?  →  signature verifies, as a launcher?  →  run it
+                              │ no                            │ no
+                              └────── ignore, and log why ────┘
 ```
 
-### The `.cartridge` marker
+An earlier design had a `.cartridge` marker holding a shared key, matched against a key list
+in a `config.toml` beside the listener. It is gone, and its own documentation admitted why:
+anyone who could read a cartridge could copy its secret, so it proved recognition rather than
+authenticity. The full reasoning and the migration are in [`../SIGNING.md`](../SIGNING.md).
 
-TOML, at the volume root, written by the installer:
+### Four properties, and the reason each one is load-bearing
 
-```toml
-# GaCaSy cartridge marker
-version = 1
-key = "3f9a1c…"
-launcher = "launcher.exe"
-```
+- **The file is read; the program is never asked.** A binary that reports its own
+  trustworthiness proves nothing — a hostile one prints whatever makes it look legitimate —
+  and to ask, you would first have to execute the very thing you are deciding whether to
+  permit. Nothing here spawns anything, and nothing downstream does either: the launcher's
+  version comes out of the signature too. By the time this listener runs a launcher, it has
+  already asked every question it has.
+- **The trust anchor is compiled in, not configured.** [`build.rs`](build.rs) reads
+  `keys/*.pub` at build time and bakes them in as `ANCHORS`; a fresh clone with no `keys/`
+  does not compile at all. Were the accepted keys a line in a file beside the exe, anything
+  that could write that file could append its own key and get arbitrary code auto-run on
+  every insert. Changing what a listener trusts means replacing the listener.
+- **The signature declares a role.** All three GaCaSy programs are signed with the same key,
+  so "signed by us" is not the same question as "is a launcher" — a genuine `installer.exe`
+  renamed to `launcher.exe` is still genuinely signed. minisign authenticates a *trusted
+  comment* alongside the payload, so the role written into it (`gacasy-launcher`) is as
+  unforgeable as the file itself. [`../trust/`](../trust/) checks both, and is the one place
+  that does for every program that needs to.
+- **The file is held still.** Verifying bytes and then executing a *path* is two different
+  files if anything can change the disk in between — and the disk was plugged in by a
+  stranger. The file is opened once denying writes and deletes to everyone else, and that
+  handle is held until the launcher has been started. It does not stop hostile USB
+  *firmware*, which lies below the filesystem; it stops anything going through Windows.
 
-- `version` — format version, so a later change has something to migrate from. A marker
-  declaring a version this build doesn't know is **refused**, not guessed at: every other
-  field could mean something else in a later format.
-- `key` — this cartridge's identity.
-- `launcher` — the binary to start, relative to the volume root. The listener reads it
-  rather than hardcoding a name, which is what lets a Linux cartridge name a different
-  binary without any listener change.
+### What this does not cover
 
-Unlike the listener's own config.toml, the marker is **not** parsed forgivingly — a missing
-key or launcher describes no cartridge worth starting, so it fails as a whole and the volume
-is ignored with a logged reason.
+The signature is over `launcher.exe`'s own bytes and only those. `catalog.json`,
+`config.toml`, `assets/` and `games/` sit beside it on the same disk, written by whoever made
+the cartridge — typically the installer, on a machine holding no signing key — and carry no
+signature of their own. Nothing could sign them, so nothing does. The launcher therefore
+treats that content as untrusted input regardless of how it was started.
 
-The `launcher` path must stay **inside the volume**: no absolute paths, no drive prefix, no
-`..`. A marker is trusted to name a binary *on its own cartridge* and no further, otherwise
-"plug in a disk" quietly becomes "run an arbitrary program already on this PC".
+The residual case this leaves open, stated plainly: someone who copies a genuine, publicly
+available signed launcher onto a drive alongside their own catalog and games gets it
+auto-started. The signature proves the launcher is genuine, not that the drive is. See
+[`../SIGNING.md`](../SIGNING.md) §1.
 
-### Listener configuration
+### Why a volume is refused
 
-The listener's own `config.toml`, written beside its exe by the installer:
+Every refusal is logged with its reason, and they are deliberately different from each other:
 
-```toml
-keys = ["3f9a1c…", "b72e04…"]
-# log_file = "listener.log"
-debounce_seconds = 5
-```
+| | |
+| --- | --- |
+| no `launcher.exe` at the root | the ordinary case — every USB stick anyone ever plugs in. Not a problem, and deliberately not alarming. |
+| unreadable | there and could not be opened |
+| unsigned | a self-built or stripped binary |
+| malformed | a signature block that is not a minisign signature |
+| untrusted | correctly signed, by a key this build does not accept. The interesting one, and the only refusal whose log line names the anchors. |
+| wrong role | genuinely signed, and not as a launcher |
 
-- `keys` — every cartridge key this PC trusts. A **list**, so pairing a second cartridge
-  appends rather than un-pairing the first. The installer appends; the user can hand-edit.
-  Compared case- and whitespace-insensitively, because this key gets copied between two files
-  by hand often enough that `3F9A` failing to match `3f9a` would only ever be a support
-  burden — it is a recognition handshake, not a secret (see the version note below).
-- `log_file` — where to append activity. Defaults to `listener.log` **beside the exe and the
-  config**, so all three of the listener's files sit in one folder you can open — and for an
-  installed listener that folder is `%LOCALAPPDATA%\GaCaSy\`, which it can always write. An
-  empty string disables logging. A copy dropped by hand somewhere read-only falls back to
-  `%LOCALAPPDATA%\GaCaSy\listener.log` rather than going silent; that is the same folder an
-  install uses, so there is only ever one place to look for this file.
-- `debounce_seconds` — how long to ignore repeat arrivals for a drive letter just handled.
+`listener.exe --signature` prints this build's own signature and the keys it trusts, which is
+how to find out what a given copy will accept without plugging anything in.
 
-### An empty `keys` list trusts everything
+### Settings
 
-**`keys = []` accepts any cartridge**, rather than none. The unpaired default is *open*, not
-*locked*: a fresh install works the moment a volume carries a valid `.cartridge`, with no
-pairing step. Listing even one key switches the listener to matching that list and nothing
-else.
+There are none to edit. The debounce window (5s, how long repeat arrivals for a drive letter
+already handled are ignored) and the log path are compiled in — see
+[`src/settings.rs`](src/settings.rs), whose module doc explains why a file that exists to be
+found, read and left alone is a file worth deleting.
 
-Worth being clear about what open means: any volume with a well-formed marker will have the
-binary that marker names started. The marker is then the only thing between plugging a disk
-in and running something off it — which is a reasonable v1 posture for a tool whose trust
-model is already "a shared secret anyone who can read the cartridge can copy", but it is a
-real choice, not an oversight.
-
-One consequence shows up in the parsing: blank entries in `keys` are **kept**, not filtered
-out. They can never match anything, but dropping them would turn `keys = [""]` into an empty
-list — silently promoting a locked-down config to an open one over a stray blank string.
-
-The file is parsed **forgivingly, key by key**, the same way the launcher reads its own config:
-one wrong-typed value costs that setting only. Rejecting the whole file over a typo would
-silently un-pair every cartridge on the PC, which is a much worse failure than one setting
-falling back to its default.
+The log defaults to `listener.log` **beside the exe**, so the listener's two files sit in one
+folder — for an installed listener that is `%LOCALAPPDATA%\GaCaSy\`, which it can always
+write. A copy dropped by hand somewhere read-only falls back to
+`%LOCALAPPDATA%\GaCaSy\listener.log` rather than going silent, so there is only ever one
+place to look.
 
 Reading the log is the only way to see what the listener did — it has no console and no
 visible window. Every volume it looks at produces a line, including the ignored ones and why.
-
-**Version note.** This shared-key scheme is **v1** — it proves "this looks like a GaCaSy
-cartridge I know about", but it is not a strong security boundary: anyone who can read a
-cartridge can copy its key. It is a recognition handshake, not tamper protection.
 
 ## Open questions
 
@@ -338,15 +346,15 @@ same way.
   guard on, and it is true only when the exe's parent folder is named `output` — on a real
   cartridge the exe sits at the volume root.
   So nothing dedupes today. Left as a launcher-side issue rather than worked around here.
-- **Re-arrival debounce.** *Settled: `debounce_seconds`, default 5, keyed on drive letter.*
+- **Re-arrival debounce.** *Settled: `settings::DEBOUNCE_SECONDS`, 5, keyed on drive letter.*
   Long enough to swallow the repeat events a flaky USB link produces, short enough that
-  deliberately re-plugging a cartridge still works. Keyed on the letter rather than the
-  marker, since keying on the marker means reading the volume before deciding to skip it —
-  most of the work the debounce exists to avoid. The consequence is that swapping a
+  deliberately re-plugging a cartridge still works. Keyed on the letter rather than on the
+  volume's contents, since deciding by contents means reading the volume before deciding to
+  skip it — most of the work the debounce exists to avoid. The consequence is that swapping a
   *different* cartridge into the same letter within the window is also skipped; at five
   seconds that is not a real sequence.
-- **Network and virtual volumes.** *Settled: filtered out explicitly, not left to the missing
-  `.cartridge`.* On Windows that means `DRIVE_FIXED` / `DRIVE_REMOVABLE` only, plus dropping
+- **Network and virtual volumes.** *Settled: filtered out explicitly, not left to the absent
+  launcher.* On Windows that means `DRIVE_FIXED` / `DRIVE_REMOVABLE` only, plus dropping
   any arrival flagged `DBTF_NET`. The reason to be explicit is timing, not tidiness: reaching
   for a file on a stale network mount can block for a long time, and this runs on the message
   thread. **Linux needs the equivalent** — an SMB or VM-shared mount under `/media` must be
@@ -357,11 +365,11 @@ same way.
 
 ## Future
 
-**v2 — signature-based trust.** Once `launcher.exe` is officially **code-signed**, the
-listener verifies the exe's signature instead of matching a shared secret. That **replaces**
-the key check rather than augmenting it, and `.cartridge` becomes unnecessary — the listener
-looks for the launcher binary on the volume and checks its signature. Trust becomes
-cryptographic, and there is no secret on the cartridge to copy.
+**Linux.** The one substantial thing left in this crate — see
+[Linux — reactive, one-shot](#linux--reactive-one-shot) for the design and
+[`TODO.md`](TODO.md) for the list.
+
+Signature-based trust used to be the headline here. It shipped; see [Trust](#trust).
 
 ## Status / roadmap
 
@@ -371,10 +379,11 @@ same list in more detail.
 **Shared core** — OS-agnostic, built once, in [`src/volume.rs`](src/volume.rs) and friends:
 
 - [x] Rust codebase scaffold, `cfg`-gated per OS.
-- [x] Parse the `.cartridge` marker and this listener's `config.toml` key list.
-- [x] Trust check: marker key present in `keys`.
-- [x] Auto-launch the marker's `launcher` binary from the volume root, refusing paths that
-      escape it.
+- [x] Verify `launcher.exe`'s minisign signature against the anchors `build.rs` baked in, and
+      require it to declare the launcher role.
+- [x] Hold the verified file open against writers and deleters until it has been started.
+- [x] Take the launcher's version from the signed comment rather than running it.
+- [x] Auto-launch it from the volume root.
 - [x] Log ignored volumes with the reason.
 
 **Windows trigger** — resident, in [`src/trigger/windows.rs`](src/trigger/windows.rs):
@@ -385,8 +394,8 @@ same list in more detail.
 - [x] Named-mutex single-instance guard.
 - [x] Drive-type and `DBTF_NET` filtering, arrival debounce, and `SEM_FAILCRITICALERRORS`
       so an empty card reader can't pop a modal error box.
-- [ ] End-to-end run against real removable hardware — see [`TODO.md`](TODO.md) for exactly
-      which seam that leaves untested.
+- [x] End-to-end run against real removable hardware: a genuine arrival carried all the way
+      through to a launch.
 
 **Linux trigger** — one-shot, not started
 ([`src/trigger/linux.rs`](src/trigger/linux.rs) is a placeholder):
@@ -399,7 +408,6 @@ same list in more detail.
 **Both:**
 
 - [x] Behave correctly when started by hand, plus `--check <path>` to run the core against a
-      single volume and exit. Registering the Windows login entry and
-      installing the Linux udev rule are the **installer's** job — see
-      [`../installer/structure.md`](../installer/structure.md).
-- [ ] v2: verify the code-signed launcher's signature and drop `.cartridge` handling.
+      single volume and exit, and `--signature` to print what this build trusts. Registering
+      the Windows login entry and installing the Linux udev rule are the **installer's**
+      job — see [`../installer/structure.md`](../installer/structure.md).
