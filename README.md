@@ -52,10 +52,10 @@ GaCaSy/
       config.toml      Seed look & feel
     assets/
       fonts/
-        BackOut.woff2  The typeface, also baked into the exe
+        DepartureMono.woff2  The typeface, also baked into the exe
     licenses/        Third-party licences the launcher's assets ship under:
-      OFL-BackOut.txt  BackOut, by Frank Adebiaye with Ariel Martín Pérez
-                       (Velvetyne Type Foundry), SIL Open Font License 1.1
+      OFL-DepartureMono.txt  Departure Mono, by Helena Zhang,
+                             SIL Open Font License 1.1
     structure.md     Developer reference for the cartridge side
     TODO.md          What's left to build on the cartridge side
     output/          What ships on the cartridge:

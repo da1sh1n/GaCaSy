@@ -17,24 +17,45 @@
   header explains why the duplication is deliberate rather than accidental.
 */
 
-/* BackOut, by Frank Adebiaye with Ariel Martín Pérez (Velvetyne Type Foundry),
-   under the SIL Open Font License 1.1 — the licence ships in
-   launcher/licenses/OFL-BackOut.txt, which the OFL requires.
-   <https://velvetyne.fr/fonts/backout/>
+/* Departure Mono v1.500, by Helena Zhang, under the SIL Open Font License 1.1 —
+   the licence ships in launcher/licenses/OFL-DepartureMono.txt, which the OFL
+   requires. <https://departuremono.com/>
 
-   Every piece of text in the launcher, not just the name line. It is a
-   single-weight display face, which has two consequences worth knowing rather
-   than discovering: there is no bold to mark the active order segment with, so
-   that is done with the pill's fill instead; and small sizes need a little more
-   room than a text face would, hence the slightly larger chrome sizes and the
-   tracking on the smaller labels below.
+   Every piece of text in the launcher. A pixel face on a machine that exists to
+   be plugged in and turned on, which is the whole reason it is here.
+
+   ── THE ONE RULE ───────────────────────────────────────────────────────
+   The font's own documentation: "for pixel-perfect results, set the font size
+   to increments of 11px." That is not advice, it is the difference between the
+   face looking drawn and looking smeared, so no rule in this file states a
+   font-size of its own. Every one of them is `var(--type-unit)`, which app.js
+   computes from devicePixelRatio so the size lands on whole DEVICE pixels — an
+   11px CSS rule is 13.75 device pixels at 125% scaling, and that quarter pixel
+   is all it takes. The name line is the only thing that varies, and it steps by
+   whole units rather than scaling (see #nameplate, and sizeNameplate in app.js).
+
+   Two things follow from that, worth knowing rather than discovering:
+
+   - The chrome is all one size. On an 11px grid the next step up is 22px, which
+     is nameplate territory, so there is no size hierarchy available down here.
+     What separates the toolbar from the status line from an error note is the
+     colour ramp (--toolbar-color / --text / --error-text-color) and the pill
+     fill, and it has to stay that way.
+   - Tracking is 0, everywhere. letter-spacing in `em` resolves to fractions of
+     a pixel and walks the glyphs straight off the grid the size was chosen to
+     land on. The face is monospace and spaced for reading already. If a rule
+     ever genuinely needs air, give it a whole `px`, never an `em`.
+
+   1,186 glyphs, covering Latin, Cyrillic and Greek — so unlike the display face
+   this replaced, a game named in Russian renders in the launcher's own type
+   rather than falling through to whatever the system has.
 
    `swap`, because the page must never wait on it: the launcher exists to be on
    screen the moment a drive is plugged in, and a blocked first paint would
    cost more than one unstyled frame. */
 @font-face {
-  font-family: "BackOut";
-  src: url("fonts/BackOut.woff2") format("woff2");
+  font-family: "DepartureMono";
+  src: url("fonts/DepartureMono.woff2") format("woff2");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -95,6 +116,12 @@
      it in the window height; this is the page's copy of that same number. */
   --toolbar-band: 56px;
   --loading-text-gap: 12px;
+  /* The type grid — every font-size in this file. app.js overwrites it with the
+     value that lands on whole device pixels for the display actually in front
+     of the user; 11px is what that comes to at 100% scaling, and is here so a
+     page that somehow runs without the script is still on the grid. See the
+     @font-face block above for why this is not negotiable. */
+  --type-unit: 11px;
   /* Thickness of the "missing" sign's stroke, recomputed per cover in
      layout() so it stays proportional at any cover size. */
   --sign-stroke: 6px;
@@ -130,12 +157,23 @@ html, body {
 body {
   display: flex;
   flex-direction: column;
-  /* BackOut throughout. Segoe UI behind it is not a style choice but a
-     coverage one: BackOut is Latin, so a game named in Cyrillic or Japanese
-     falls through per-glyph to a face that has those, which is the right
-     outcome and needs no code. */
-  font-family: "BackOut", "Segoe UI", system-ui, sans-serif;
-  letter-spacing: 0.02em;
+  /* Departure Mono throughout, and the size every rule below inherits rather
+     than restates.
+
+     The fallbacks are a coverage decision, not a style one: the face covers
+     Latin, Cyrillic and Greek, so what falls through is CJK and the rest, per
+     glyph, which needs no code. They are monospace fallbacks on purpose —
+     dropping from a monospace to a proportional face mid-name reflows the line
+     around the one glyph that was missing. */
+  font-family: "DepartureMono", "Cascadia Mono", Consolas, ui-monospace, monospace;
+  font-size: var(--type-unit);
+  letter-spacing: 0;
+  /* Single weight. Without this, any font-weight above 400 gets a synthesized
+     bold — the engine smearing the glyphs sideways, which on a pixel face is
+     immediately obvious. Nothing asks for one today; this is what keeps a
+     later `font-weight: 600` from quietly looking broken instead of doing
+     nothing. */
+  font-synthesis: none;
 }
 
 /* The last item in the toolbar row, not pinned to the window corner. Being in
@@ -160,7 +198,11 @@ body {
   border-radius: var(--control-radius);
   background: var(--accent);
   color: var(--primary);
-  font-size: 0.95rem;
+  /* Two units, not one — the only rule in the chrome that steps up, because it
+     sets a single ✕ inside a 30px button rather than a run of text. At one unit
+     the mark's ink is about five pixels and reads as a speck. Still on the
+     grid, which is the constraint that actually matters. */
+  font-size: calc(var(--type-unit) * 2);
   line-height: 1;
   cursor: pointer;
   transition: filter 0.12s ease-out;
@@ -201,8 +243,8 @@ body {
   justify-content: space-between;
   gap: 12px;
   color: var(--toolbar-color);
-  font-size: 0.85rem;
-  letter-spacing: 0.05em;
+  font-size: var(--type-unit);
+  letter-spacing: 0;
   transition: opacity 0.25s ease;
 }
 
@@ -460,21 +502,18 @@ body.scrollable #scrollbar {
    pointed at is worth reading. Absolutely positioned so a card's height stays
    exactly its image's height and the sizing contract with Rust is untouched.
 
-   The one place BackOut actually belongs. It is a single-weight display face,
-   no use at all for a 0.8rem search placeholder or a status line — but this is
-   the shelf's name plate, the one piece of large low-frequency text in the
-   product, and a display face is exactly what a name plate wants. With the
-   chrome gone monochrome so cover art can be the only colour on screen, this
-   is also the only place any personality is left to live.
+   The only text in the launcher that is not exactly one --type-unit, and the
+   reason --nameplate-size exists. Everything else in the chrome is a label at
+   the grid's base size; this is the shelf's name plate, the one piece of large
+   low-frequency text in the product, and with the chrome gone monochrome so
+   cover art can be the only colour on screen, the one place any personality is
+   left to live.
 
-   Note that it is *not* confined here today: `body` above sets it on
-   everything, which is the problem TODO.md's "The typeface" item is about. When
-   that is fixed this rule stays and the one on `body` changes.
-
-   Latin only; a name outside that falls through to the chrome face, which is
-   the right outcome and needs no code. --nameplate-size is set by layout()
-   from the gap actually available, so a cartridge with a tighter border_gap
-   gets a smaller line rather than a clipped one. */
+   It still cannot leave the grid: sizeNameplate in app.js gives it one whole
+   unit or two, chosen from the gap actually available, so a cartridge with a
+   tighter border_gap gets the smaller step rather than a clipped line. It used
+   to interpolate freely across that range, which under a pixel face meant a
+   continuum of blurry with two sharp points in it. */
 #nameplate {
   position: fixed;
   /* Shrink-wrapped, not full width: placeNameplate() centres it on the cover
@@ -490,8 +529,8 @@ body.scrollable #scrollbar {
   display: none;
   align-items: center;
   justify-content: center;
-  font-size: var(--nameplate-size, 16px);
-  letter-spacing: 0.04em;
+  font-size: var(--nameplate-size, 11px);
+  letter-spacing: 0;
   line-height: 1;
   color: var(--text);
   text-align: center;
@@ -544,7 +583,7 @@ body.empty #empty {
   margin: 0;
   color: var(--text);
   opacity: 0.75;
-  font-size: 0.85rem;
+  font-size: var(--type-unit);
 }
 
 .card {
@@ -669,11 +708,14 @@ body.launching .card.chosen .cover::after {
   /* Wraps to a second line rather than ellipsising: the message is the whole
      point of the state, and a cover is only ~260px wide. Two lines is what
      the border gap under the cover has room for. */
+  /* Whole pixels, both of them: a fractional line box puts the second line's
+     baseline on a half pixel and undoes the grid for the text that most needs
+     to be read. */
   line-height: 15px;
   max-height: 30px;
   color: var(--error-text-color);
-  font-size: 0.8rem;
-  letter-spacing: 0.03em;
+  font-size: var(--type-unit);
+  letter-spacing: 0;
   text-align: center;
   overflow: hidden;
 }
@@ -925,8 +967,8 @@ body.launching #scrim {
   right: 0;
   top: calc(var(--track-top, 50%) + var(--loading-text-gap));
   color: var(--loading-text-color);
-  font-size: 0.8rem;
-  letter-spacing: 0.05em;
+  font-size: var(--type-unit);
+  letter-spacing: 0;
   text-align: center;
 }
 

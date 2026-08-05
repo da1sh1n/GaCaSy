@@ -89,9 +89,9 @@ launcher/
     catalog.json   <- seed game list, same
   assets/
     fonts/
-      BackOut.woff2 <- the typeface, embedded too, served at app://fonts/…
+      DepartureMono.woff2 <- the typeface, embedded too, served at app://fonts/…
   licenses/
-    OFL-BackOut.txt <- required by the SIL Open Font License the face ships under
+    OFL-DepartureMono.txt <- required by the SIL Open Font License the face ships under
   structure.md
   output/          <- the deployed cartridge content (see above)
 ```
@@ -102,6 +102,36 @@ cartridge's contents, and the launcher would then quietly fall back to a system 
 Compiled in, it is exactly as present as the code that asks for it — and it is the strongest
 form of "works with no network": there is nothing to fetch even in principle. That is why
 `assets/fonts/` exists in the repo but not under `output/`.
+
+### The 11px grid
+
+The face is **Departure Mono** (Helena Zhang, OFL-1.1), a pixel monospace, and its own
+documentation states the constraint: *set the font size to increments of 11px*. That is the
+difference between the type looking drawn and looking smeared, so it is a commitment the
+whole stylesheet is written against rather than a preference:
+
+- **No rule in `style.css` states a font-size of its own.** Every one is `var(--type-unit)`,
+  and the single exception steps by whole units (`#close-btn`, which sets one ✕ inside a
+  30px button).
+- **`--type-unit` is computed in `app.js`, not fixed in the CSS**, because the grid is in
+  *device* pixels. An 11px CSS rule is 13.75 device pixels at 125% scaling, and that quarter
+  pixel is enough to undo it — so the value is rounded to whole device pixels for whatever
+  display the window actually opened on. The literal in `:root` is what that comes to at
+  100%, kept so a page running without the script is still on the grid.
+- **The name line is the only thing that varies**, and it steps rather than scales:
+  `sizeNameplate()` gives it one unit or two from the gap actually available. It used to
+  interpolate across 11–22px, which under a pixel face is a continuum of blurry with two
+  sharp points in it.
+- **Tracking is `0` everywhere.** `em` letter-spacing resolves to fractions of a pixel and
+  walks glyph origins off the grid the size was chosen to land on.
+
+The cost, which is worth knowing before someone tries to fix it: the next step up is 22px, so
+**the chrome is all one size**. Hierarchy in the toolbar comes from the colour ramp and the
+pill fill, and there is no size in between to reach for.
+
+The face covers Latin, Cyrillic and Greek (1,186 glyphs), so only CJK and beyond fall through
+to the fallback — and the fallbacks are monospace on purpose, since dropping to a proportional
+face mid-name reflows the line around the one glyph that was missing.
 
 One file per job, and `main.rs` is only the front door. Two conventions hold the split
 together: **every tunable number lives in `constants.rs`** (the module that owns each one
@@ -205,8 +235,8 @@ One row of covers in a horizontal scroll viewport, with a toolbar across the top
 - **One name line, not thirty captions.** `show_captions` now governs a single line in the
   gap under the row, naming whichever cover is selected and following it along the row. Per
   card it was noise, and it is what keeps every card exactly as tall as its image so the
-  sizing contract with `window.rs` needs no adjustment. Set in **BackOut** (Velvetyne,
-  OFL-1.1), which appears nowhere else in the UI.
+  sizing contract with `window.rs` needs no adjustment. The one piece of text in the UI
+  that is not exactly one `--type-unit` — see [The 11px grid](#the-11px-grid).
 - **Selection is one index**, fed by both hover and focus, and it decides three things at
   once: which cover is lifted, which is clear of the veil, and which one the name line
   names. Deliberately not a separate hover state and focus state — those can disagree, and

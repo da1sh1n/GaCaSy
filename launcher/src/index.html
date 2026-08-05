@@ -6,10 +6,10 @@
   v3.0 or later. GaCaSy comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
   or <https://www.gnu.org/licenses/> for details.
 
-  The markup only. Look lives in style.css, behaviour in app.js — all three
-  are served over app:// from src/, live in dev and from rust-embed on a
-  deployed cartridge. The spacing numbers shared with Rust are documented at
-  the top of those two files; see src/constants.rs for why they are duplicated.
+  The markup only. Look lives in style.css, behaviour in the app.js module
+  graph — all served over app:// from src/, live in dev and from rust-embed on
+  a deployed cartridge. The spacing numbers shared with Rust live in theme.js;
+  see src/constants.rs for why they are duplicated.
 -->
 <html lang="en">
 <head>
@@ -53,6 +53,24 @@
   </div>
 
   <div id="gallery"><div id="grid"></div></div>
+  <!-- One cover, cloned per game by cards.js. Markup belongs here rather than
+       in a dozen createElement calls; the grip is only visible while
+       arranging. -->
+  <template id="card-template">
+    <button class="card" type="button">
+      <span class="cover">
+        <img alt="" />
+        <span class="sign"></span>
+        <span class="grip">
+          <svg width="18" height="4" viewBox="0 0 18 4" aria-hidden="true">
+            <circle cx="2" cy="2" r="1.6" /><circle cx="9" cy="2" r="1.6" />
+            <circle cx="16" cy="2" r="1.6" />
+          </svg>
+        </span>
+      </span>
+      <span class="note"></span>
+    </button>
+  </template>
   <!-- Shown in place of the gallery when the catalog is empty. Hidden by
        default: the common case is a cartridge with games, and a message that
        flashes before the covers appear would read as an error that wasn't one.
@@ -86,6 +104,8 @@
   <div id="track" aria-hidden="true"><div id="track-run"></div></div>
   <div id="status" role="status"></div>
 
-  <script src="app.js"></script>
+  <!-- A module, so the page script can be split by concern; app.js pulls the
+       rest in. All of them are served over app:// the same way. -->
+  <script type="module" src="app.js"></script>
 </body>
 </html>
