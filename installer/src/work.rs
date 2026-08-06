@@ -4,16 +4,14 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! The worker thread, and how the UI hears from it.
+//! The worker thread, and how the UI hears from it. Two operations run here:
+//! walking a game folder, and copying one.
 //!
-//! Two operations in this installer take long enough that doing them on the UI
-//! thread would freeze the window: walking a game folder, and copying one. Both
-//! go through here.
-//!
-//! egui only repaints when something asks it to, so every message is followed by
-//! a `request_repaint`. Without that the progress bar would advance only when the
-//! mouse moved — the classic "it looks frozen but isn't" bug in an immediate-mode
-//! UI over a background thread.
+//! egui repaints only when something asks it to, so every message is followed
+//! by a `request_repaint` — otherwise the progress bar advances only when the
+//! mouse moves.
+
+// ########## THE WORKER THREAD ##########
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -112,7 +110,7 @@ impl Job {
         }
     }
 
-    pub fn request_cancel(&self) {
+    pub fn requestCancel(&self) {
         self.cancel.store(true, Ordering::Relaxed);
     }
 
@@ -167,4 +165,4 @@ impl Drop for Scanning {
 // because it was slow. The version it went looking for is inside the signature
 // the file already carries, so the thread existed to execute an arbitrary binary
 // off a stranger's USB stick in order to learn something the installer could
-// simply read. See `../src/volume.rs::attested_launcher`.
+// simply read. See `../src/volume.rs::attestedLauncher`.

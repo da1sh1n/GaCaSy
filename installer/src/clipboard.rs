@@ -4,23 +4,9 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! Copy and paste, for the one text field in this program.
-//!
-//! There is exactly one place to type in the whole wizard — a game's name, on the
-//! games screen — and a name is precisely the kind of thing someone pastes. So
-//! this exists.
-//!
-//! **Why it is hand-rolled.** egui's winit integration has clipboard support
-//! already, behind a feature flag; turning that flag on pulls in `arboard`, which
-//! egui asks for with `image-data`, which drags the whole `image` and `png` stack
-//! into the binary so that someone can paste a *picture* into a field that holds
-//! a game's name. That is around a megabyte for a feature this program does not
-//! have. Two Win32 calls in each direction is the cheaper trade — see
-//! [`crate::shell`] for where they are wired in.
-//!
-//! Every failure is silent. A clipboard that is locked by another process, or
-//! holds a bitmap, means the keystroke does nothing — which is what the user
-//! would see from any other program in the same moment.
+//! Gets and sets clipboard text through Win32. Every failure is silent.
+
+// ########## CLIPBOARD ##########
 
 #![cfg(windows)]
 

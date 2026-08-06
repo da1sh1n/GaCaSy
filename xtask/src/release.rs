@@ -4,33 +4,27 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! Building a release, in the one order that works.
-//!
-//! Four stages, and the dependencies between them are not the kind cargo can
-//! see:
-//!
-//! 1. build `launcher` and `listener`
-//! 2. **sign them** — this rewrites the files cargo just produced
-//! 3. build `installer`, whose `build.rs` embeds those now-signed bytes
-//! 4. sign the installer
-//!
-//! Stage 3 has to come after stage 2 or the installer ships an unsigned
-//! launcher, which every listener would then refuse — a cartridge that fails
-//! silently at the moment someone plugs it in, having built and installed
-//! without a single error. That failure is expensive enough, and quiet enough,
-//! that the sequence lives in code rather than in a README.
+//! Runs the release sequence: build launcher and listener, sign them, build the
+//! installer around those signed bytes, sign it, then verify all three.
+
+// ########## THE RELEASE SEQUENCE ##########
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::{keys, manifest, sign};
 
+/// Runs all four stages against the workspace at `root`, then verifies what it
+/// just signed. Fails at the first stage that does, leaving nothing half-signed
+/// beyond that point.
 pub fn run(root: &Path) -> Result<(), String> {
     // Before anything is built: a set of programs that disagree about their own
     // compatibility generation is not a release, and finding that out after two
     // link steps helps nobody.
     let project_version = manifest::check(root)?;
     let (_, crates) = manifest::read(root)?;
+    // A closure rather than a map: three lookups over six crates is not worth
+    // building an index for, and this keeps `crates` the single source.
     let version = |name: &str| {
         crates
             .iter()
@@ -39,7 +33,9 @@ pub fn run(root: &Path) -> Result<(), String> {
             .unwrap_or_default()
     };
 
-    let key = keys::secret_key(root)?;
+    // Loaded before the first build: an encrypted key prompts, and a prompt
+    // twenty minutes into a link step is a prompt nobody is sitting there for.
+    let key = keys::secretKey(root)?;
     let release = root.join("target").join("release");
 
     println!("== building launcher and listener");
@@ -107,9 +103,9 @@ pub fn run(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Runs cargo, inheriting stdio so its progress and errors reach the terminal
-/// unchanged. A build tool that swallows the compiler's output is worse than no
-/// build tool.
+/// Runs cargo with `args` in `root`, inheriting stdio so its progress and
+/// errors reach the terminal unchanged. Fails if cargo cannot be started or
+/// exits non-zero.
 fn cargo(root: &Path, args: &[&str]) -> Result<(), String> {
     // `CARGO` is set when we were started by cargo, which is the only supported
     // way in; the fallback is for someone running the binary directly.
@@ -127,7 +123,11 @@ fn cargo(root: &Path, args: &[&str]) -> Result<(), String> {
     }
 }
 
+/// `stem` as a binary filename for the host platform — `.exe` on Windows, bare
+/// everywhere else.
 fn exe(stem: &str) -> PathBuf {
+    // `cfg!` is a runtime bool the optimiser folds away, so both arms have to
+    // type-check on both platforms — unlike `#[cfg]`, which deletes one.
     PathBuf::from(if cfg!(windows) {
         format!("{stem}.exe")
     } else {

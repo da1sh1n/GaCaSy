@@ -5,53 +5,45 @@
 // or <https://www.gnu.org/licenses/> for details.
 
 //! Every test in this crate, one submodule per source module.
-//!
-//! Deliberately small. This is a UI-driven binary, and anything you can see by
-//! running it — window sizing, config styling, log formatting — is not tested
-//! here. What survives are the things a person cannot check by looking: whether
-//! the version string the listener parses still has the shape the listener
-//! requires, whether a `catalog.json` entry can still name a path outside the
-//! cartridge (the field this launcher's own signature has never covered),
-//! whether a half-written cover order still comes out usable, and whether
-//! writing one back leaves the rest of somebody's config.toml alone.
-//!
 //! Run with `cargo test -p launcher`.
 
+// ########## LAUNCHER TESTS ##########
+
 mod catalog {
-    use crate::catalog::is_contained;
+    use crate::catalog::isContained;
 
     #[test]
     fn ordinary_relative_paths_stay_inside() {
-        assert!(is_contained("games/bg3/bg3.exe"));
-        assert!(is_contained("images/bg3.png"));
-        assert!(is_contained("./games/bg3/bg3.exe"));
+        assert!(isContained("games/bg3/bg3.exe"));
+        assert!(isContained("images/bg3.png"));
+        assert!(isContained("./games/bg3/bg3.exe"));
     }
 
     #[test]
     fn a_drive_letter_escapes() {
         // `Path::join` with this discards the base entirely — the whole reason
         // this check exists rather than trusting `join` to contain it.
-        assert!(!is_contained(r"C:\Windows\System32\cmd.exe"));
-        assert!(!is_contained("C:/Windows/System32/cmd.exe"));
+        assert!(!isContained(r"C:\Windows\System32\cmd.exe"));
+        assert!(!isContained("C:/Windows/System32/cmd.exe"));
     }
 
     #[test]
     fn a_unc_path_escapes() {
-        assert!(!is_contained(r"\\attacker.example\share\payload.exe"));
+        assert!(!isContained(r"\\attacker.example\share\payload.exe"));
     }
 
     #[test]
     fn a_leading_root_escapes() {
-        assert!(!is_contained("/etc/passwd"));
+        assert!(!isContained("/etc/passwd"));
     }
 
     #[test]
     fn a_parent_dir_component_escapes() {
-        assert!(!is_contained("../../evil.exe"));
-        assert!(!is_contained("games/../../evil.exe"));
+        assert!(!isContained("../../evil.exe"));
+        assert!(!isContained("games/../../evil.exe"));
         // Buried in an otherwise-ordinary-looking path — the shape most likely
         // to slip past a reviewer's eye rather than a machine's.
-        assert!(!is_contained("games/bg3/../../../evil.exe"));
+        assert!(!isContained("games/bg3/../../../evil.exe"));
     }
 }
 
@@ -119,9 +111,8 @@ mod order {
 mod config {
     use std::fs;
 
-    /// A scratch directory that cleans itself up, so the round-trip below can
-    /// use a real file — which is the whole point of it, since what's being
-    /// checked is what ends up on disk.
+    /// A scratch directory that cleans itself up. The config round trip needs
+    /// a real file, since what is being checked is what ends up on disk.
     struct Scratch(std::path::PathBuf);
 
     impl Scratch {
@@ -179,7 +170,7 @@ border_gap = 36
     #[test]
     fn storing_a_key_the_file_never_had_appends_it() {
         // A cartridge set up before the setting existed. It has to arrive
-        // documented, the same way `sync_defaults` would have introduced it.
+        // documented, the same way `syncDefaults` would have introduced it.
         let scratch = Scratch::new("store-appends");
         fs::write(scratch.0.join("config.toml"), "border_gap = 36\n").unwrap();
 

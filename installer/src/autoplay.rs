@@ -4,37 +4,10 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! Stopping Windows from opening a folder when a cartridge is plugged in.
-//!
-//! Plugging a cartridge in fires two things at once: the listener hears
-//! `WM_DEVICECHANGE` and starts the launcher, and **AutoPlay** does whatever the
-//! user last told it to do with removable drives. On most PCs that is "Open
-//! folder to view files", so an Explorer window opens over the launcher a moment
-//! after it appears. Nothing Romzeta does causes it and nothing Romzeta does can
-//! out-race it; the setting itself has to change.
-//!
-//! ## What this changes, exactly
-//!
-//! The same thing as **Settings → Bluetooth & devices → AutoPlay → "Removable
-//! drive" → "Take no action"**. It is stored per user as the `(Default)` value
-//! of [`CHOSEN_KEY`], with [`DEFAULT_KEY`] kept in step so the Settings app
-//! shows the same answer it is acting on.
-//!
-//! ## Why it is a checkbox and not just done
-//!
-//! **It applies to every removable drive for that user, not only cartridges.**
-//! Windows has no way to pre-set AutoPlay for a device it has never seen: the
-//! per-device choices under `AutoplayHandlers\KnownDevices` are keyed by a
-//! `ContainerID` that does not exist until the thing has been plugged in once.
-//! So the only lever available is the general one, and changing how a user's USB
-//! sticks behave is not something to do to them quietly. Hence: asked for on the
-//! listener screen, and put back on uninstall.
-//!
-//! The two blunter instruments next door are deliberately left alone —
-//! `AutoplayHandlers\DisableAutoplay` (the master "use AutoPlay for all media
-//! and devices" switch) and the `NoDriveTypeAutoRun` policy. Both turn AutoPlay
-//! off for cameras, phones and discs as well, which is far more than is needed
-//! to stop one Explorer window.
+//! Reads, rewrites and restores the per-user AutoPlay choice for removable
+//! drives, backing up the previous value under our own key.
+
+// ########## AUTOPLAY SUPPRESSION ##########
 
 /// The AutoPlay event for "a drive with ordinary files on it just arrived".
 /// Named separately from the paths below because it is the thing being talked
@@ -81,13 +54,13 @@ mod platform {
     use crate::reg::{self, HKEY_CURRENT_USER as HKCU};
 
     /// The handler AutoPlay will run for an arriving drive, if any is chosen.
-    pub fn current_choice() -> Option<String> {
+    pub fn currentChoice() -> Option<String> {
         let key = reg::open(HKCU, CHOSEN_KEY, reg::READ)?;
-        reg::query_sz(&key, None).filter(|choice| !choice.is_empty())
+        reg::querySz(&key, None).filter(|choice| !choice.is_empty())
     }
 
     pub fn suppressed() -> bool {
-        current_choice().is_some_and(|choice| choice.eq_ignore_ascii_case(TAKE_NO_ACTION))
+        currentChoice().is_some_and(|choice| choice.eq_ignore_ascii_case(TAKE_NO_ACTION))
     }
 
     pub fn suppress() -> Result<Vec<String>, String> {
@@ -98,14 +71,14 @@ mod platform {
         // second backup would record the MSTakeNoAction *we* wrote as the user's
         // own preference — after which uninstalling would "restore" the
         // suppression and never give the original setting back.
-        if !backed_up() {
+        if !backedUp() {
             let backup = reg::create(HKCU, BACKUP_KEY)?;
-            reg::set_sz(
+            reg::setSz(
                 &backup,
                 Some(BACKUP_CHOSEN),
                 previous_chosen.as_deref().unwrap_or(NONE_SENTINEL),
             )?;
-            reg::set_sz(
+            reg::setSz(
                 &backup,
                 Some(BACKUP_DEFAULT),
                 previous_default.as_deref().unwrap_or(NONE_SENTINEL),
@@ -126,45 +99,45 @@ mod platform {
         let Some(backup) = reg::open(HKCU, BACKUP_KEY, reg::READ) else {
             return Ok(Vec::new()); // never suppressed, so nothing to undo
         };
-        let chosen = reg::query_sz(&backup, Some(BACKUP_CHOSEN));
-        let default = reg::query_sz(&backup, Some(BACKUP_DEFAULT));
+        let chosen = reg::querySz(&backup, Some(BACKUP_CHOSEN));
+        let default = reg::querySz(&backup, Some(BACKUP_DEFAULT));
         drop(backup); // the key cannot be deleted while it is open
 
-        put_back(CHOSEN_KEY, chosen.as_deref())?;
-        put_back(DEFAULT_KEY, default.as_deref())?;
-        reg::delete_key(HKCU, BACKUP_KEY);
+        putBack(CHOSEN_KEY, chosen.as_deref())?;
+        putBack(DEFAULT_KEY, default.as_deref())?;
+        reg::deleteKey(HKCU, BACKUP_KEY);
 
         Ok(vec![
             "Put your Windows AutoPlay setting for removable drives back as it was".into(),
         ])
     }
 
-    fn backed_up() -> bool {
+    fn backedUp() -> bool {
         reg::open(HKCU, BACKUP_KEY, reg::READ)
-            .and_then(|key| reg::query_sz(&key, Some(BACKUP_CHOSEN)))
+            .and_then(|key| reg::querySz(&key, Some(BACKUP_CHOSEN)))
             .is_some()
     }
 
     fn read(path: &str) -> Option<String> {
         let key = reg::open(HKCU, path, reg::READ)?;
-        reg::query_sz(&key, None).filter(|value| !value.is_empty())
+        reg::querySz(&key, None).filter(|value| !value.is_empty())
     }
 
     fn write(path: &str, value: &str) -> Result<(), String> {
         // Created rather than opened: EventHandlersDefaultSelection\… is absent
         // on a profile where AutoPlay has never been touched.
         let key = reg::create(HKCU, path)?;
-        reg::set_sz(&key, None, value)
+        reg::setSz(&key, None, value)
     }
 
     /// Restores one value, where "there was nothing here" is itself a state
     /// worth restoring — writing an empty string instead would leave AutoPlay
     /// with a chosen handler of `""`.
-    fn put_back(path: &str, previous: Option<&str>) -> Result<(), String> {
+    fn putBack(path: &str, previous: Option<&str>) -> Result<(), String> {
         match previous {
             None | Some(NONE_SENTINEL) => {
                 if let Some(key) = reg::open(HKCU, path, reg::WRITE) {
-                    reg::delete_value(&key, None);
+                    reg::deleteValue(&key, None);
                 }
                 Ok(())
             }
@@ -178,7 +151,7 @@ mod platform {
 /// an installer should be rewriting. See `../../listener/structure.md`.
 #[cfg(not(windows))]
 mod platform {
-    pub fn current_choice() -> Option<String> {
+    pub fn currentChoice() -> Option<String> {
         None
     }
     pub fn suppressed() -> bool {
@@ -192,11 +165,11 @@ mod platform {
     }
 }
 
-pub use platform::{current_choice, restore, suppress, suppressed};
+pub use platform::{currentChoice, restore, suppress, suppressed};
 
 /// Whether AutoPlay is currently set to open a folder — the specific state the
 /// checkbox exists to fix, as opposed to "ask me every time" or any other
 /// handler, which are wrong for a cartridge too but less obviously so.
-pub fn opens_a_folder() -> bool {
-    current_choice().is_some_and(|choice| choice.eq_ignore_ascii_case("MSOpenFolder"))
+pub fn opensAFolder() -> bool {
+    currentChoice().is_some_and(|choice| choice.eq_ignore_ascii_case("MSOpenFolder"))
 }

@@ -4,16 +4,11 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! Every tunable number in the launcher, in one place.
-//!
-//! Nothing here does anything on its own — each constant is either a default
-//! under a `config.toml` setting, a bound the config can't cross, or a timing
-//! the config doesn't expose at all. The module each one belongs to is named
-//! in its section header.
-//!
-//! The one deliberate exception is `assets::UI_ASSET_EXTENSIONS`, which stays
-//! next to the rust-embed include list it has to mirror: they are two halves of
-//! one rule, and splitting them is how they drift apart.
+//! Every tunable number in the crate: the defaults behind `config.toml`
+//! settings, the bounds a config cannot cross, and the timings it does not
+//! expose. Section headers name the module each belongs to.
+
+// ########## TUNABLE NUMBERS ##########
 
 use std::time::Duration;
 
@@ -109,7 +104,7 @@ pub const DEFAULT_CORNER_RADIUS: f64 = 14.0; // cover corner rounding
 /// The window's own corners, in logical pixels — used only where Windows won't
 /// choose for us. Windows 11 rounds the window itself and picks its own radius;
 /// this is the Windows 10 fallback's, where the launcher does the clipping. See
-/// [`crate::window::round_corners`], which is also where the reason the page
+/// [`crate::window::roundCorners`], which is also where the reason the page
 /// doesn't draw these is written down.
 pub const DEFAULT_WINDOW_CORNER_RADIUS: f64 = 12.0;
 pub const DEFAULT_SHADOW_SIZE: f64 = 24.0; // how far the shadow reaches from the cover
@@ -132,14 +127,11 @@ pub const DEFAULT_ERROR_TEXT_COLOR: &str = "#e0b13a";
 pub const DEFAULT_MISSING_SIGN_COLOR: &str = "#d13a3a";
 pub const DEFAULT_MISSING_DIM: f64 = 0.45; // brightness multiplier for a missing game's cover
 pub const DEFAULT_OVERLAY_COLOR: &str = "rgba(0, 0, 0, 0.45)"; // screen dimming during a launch
-/// The progress line under the cover of a game that's starting. Named for the
-/// spinning ring it used to draw: the name is kept deliberately, because
-/// renaming it would silently revert every cartridge whose config already sets
-/// it, and a launcher update must not restyle somebody's launcher out from
-/// under them.
+/// The progress line under the cover of a game that's starting. Blank derives
+/// it from the accent, like the rest of the chrome.
 ///
-/// Blank derives it from the accent, like the rest of the chrome. It was
-/// `#ffffff`, which is only right over a dark scrim.
+/// Named for a spinning ring it no longer draws. The name stays: renaming it
+/// would silently revert every cartridge whose config already sets it.
 pub const DEFAULT_LOADING_RING_COLOR: &str = "";
 pub const DEFAULT_LOADING_TEXT_COLOR: &str = "";
 pub const DEFAULT_LOADING_TEXT_GAP: f64 = 12.0; // hairline's bottom edge to the status line
@@ -178,19 +170,8 @@ pub const DEFAULT_BACKGROUND_EFFECT: &str = "simple";
 /// src/theme.js for why one color is asked for rather than four.
 pub const DEFAULT_BACKGROUND_EFFECT_COLOR: &str = "";
 
-/// How opaque a cover is while it is not the one being pointed at, so the field
-/// behind shows through it. A plain opacity: 1 is solid, 0 would be invisible.
-///
-/// Named for what it is rather than following [`DEFAULT_MISSING_DIM`] next
-/// door. That one is a dimming factor and reads backwards for this — a value
-/// that goes DOWN as a cover gets more see-through should not be called a dim.
-/// `missing_dim` keeps its own name because cartridges already set it.
-///
-/// Deliberately close to solid. This replaced an opaque veil that sat at 0.28
-/// and did most of the work of saying which cover was selected — but a veil
-/// that heavy is a curtain over the art, and the cover's lift and the name line
-/// say "this one" perfectly well on their own. What is left is just enough for
-/// the field to register as being *behind* the covers rather than beside them.
+/// How opaque a cover is while it is not the one being pointed at, so the
+/// field behind shows through. A plain opacity: 1 is solid, 0 invisible.
 pub const DEFAULT_COVER_OPACITY: f64 = 0.9;
 
 // ── Cover order (order.rs, config.rs) ────────────────────────────────────
@@ -204,17 +185,11 @@ pub const DEFAULT_ORDER_MODE: &str = "usage";
 // ── Launch timings (ui.rs) ───────────────────────────────────────────────
 
 /// How long the loading state stays on screen after a launch has *failed*,
-/// before the page unwinds it and marks the cover.
+/// measured from the click, before the page unwinds it and marks the cover.
 ///
-/// Some failures come back in a few milliseconds — a missing file needs no
-/// waiting at all — and a ring that flashes and vanishes reads as a glitch
-/// rather than as an attempt that was made and didn't work. Measured from the
-/// moment the cover was clicked, so a failure that takes longer than this to
-/// arrive is reported the instant it does.
-///
-/// Handed to the page (in ms) as `__UI__.minLoadingAfterFail`; it is a fixed
-/// part of the launcher's feel, not a config.toml setting, so this constant is
-/// the only place to change it.
+/// Some failures come back in milliseconds, and a ring that flashes and
+/// vanishes reads as a glitch rather than as an attempt that did not work.
+/// Handed to the page as `__UI__.minLoadingAfterFail`; not a config setting.
 pub const MIN_LOADING_AFTER_FAIL: Duration = Duration::from_millis(1000);
 
 /// Backstop for closing after a *successful* launch. The page normally plays

@@ -4,26 +4,11 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! Reading `config.toml`, and the three keys the launcher writes back to it.
-//!
-//! The file is read as a plain table, key by key, rather than deserialized into
-//! a struct: one wrong-typed value then costs only that setting instead of
-//! rejecting the whole file, and a config written before a knob existed still
-//! works. A file that isn't valid TOML *at all* is the one case that falls back
-//! to every default.
-//!
-//! Every default lives in [`crate::constants`]; nothing here invents a number.
-//!
-//! # Reading and writing are not symmetric
-//!
-//! Almost everything here flows one way — TOML in, never out. The exceptions are
-//! `order_mode`, `usage_order` and `user_order`, which the launcher owns and
-//! keeps up to date as games are played and covers arranged. Those go back
-//! through [`store`], which edits the one key in place with `toml_edit` and
-//! leaves every comment, blank line and unrelated value exactly as it was. This
-//! file is mostly comments written for a person, and a launcher that reformatted
-//! it as a side effect of somebody starting a game would be answering a question
-//! nobody asked.
+//! Reads `config.toml` into a `Config`, key by key, and writes single keys back
+//! without disturbing the rest of the file. Holds the table of every setting,
+//! its default and its description.
+
+// ########## CONFIG.TOML ##########
 
 use std::fs;
 use std::path::Path;
@@ -32,18 +17,207 @@ use crate::constants::*;
 use crate::log;
 use crate::order;
 
+// ========== The Settings Table ==========
+
+/// How one setting is read out of the TOML table, carrying its default.
+enum Kind {
+    /// A `true` / `false`.
+    Flag(bool),
+    /// A non-negative CSS pixel count, written as an integer or a float.
+    Number(f64),
+    /// A proportion, clamped into 0..=1 rather than rejected above it: "more
+    /// solid than solid" has an obvious intent, and dropping it would silently
+    /// leave the default instead of honouring it.
+    Unit(f64),
+    /// Any non-blank CSS color string.
+    Color(&'static str),
+    /// A string that has to name one of a fixed set. A typo costs this one
+    /// setting and leaves the default, rather than picking arbitrarily.
+    OneOf(&'static str, &'static [&'static str]),
+    /// An array of catalog ids. Bounds and duplicates are not this module's
+    /// business — `order::normalize` repairs the list against the real game
+    /// count at the point of use.
+    Ids,
+}
+
+/// One key `config.toml` can hold: its TOML name, the one-line description
+/// written above it in the file, and how its value is read.
+struct Setting {
+    name: &'static str,
+    description: &'static str,
+    kind: Kind,
+}
+
+/// Every setting, in the order they appear in a config file. This is the single
+/// list: `Config::default` takes its defaults from it, `load` reads the file
+/// through it, and `syncDefaults` documents missing keys from it.
+const SETTINGS: &[Setting] = &[
+    Setting {
+        name: "show_captions",
+        description: "Show the selected game's name on one line under the row.",
+        kind: Kind::Flag(false),
+    },
+    Setting {
+        name: "border_gap",
+        description: "Empty space between the window edge and the covers, on all four sides.",
+        kind: Kind::Number(DEFAULT_BORDER_GAP),
+    },
+    Setting {
+        name: "image_gap",
+        description: "Gap between adjacent covers.",
+        kind: Kind::Number(DEFAULT_IMAGE_GAP),
+    },
+    Setting {
+        name: "corner_radius",
+        description: "How rounded each cover's corners are (0 = square).",
+        kind: Kind::Number(DEFAULT_CORNER_RADIUS),
+    },
+    Setting {
+        name: "window_corner_radius",
+        description: "How rounded the window's own corners are (0 = square).",
+        kind: Kind::Number(DEFAULT_WINDOW_CORNER_RADIUS),
+    },
+    Setting {
+        name: "primary_color",
+        description: "60% of the palette: the window behind everything.",
+        kind: Kind::Color(DEFAULT_PRIMARY_COLOR),
+    },
+    Setting {
+        name: "secondary_color",
+        description: "30%: shadows, borders, and the plate behind missing cover art.",
+        kind: Kind::Color(DEFAULT_SECONDARY_COLOR),
+    },
+    Setting {
+        name: "accent_color",
+        description: "10%: text, the selected cover, and the close button.",
+        kind: Kind::Color(DEFAULT_ACCENT_COLOR),
+    },
+    Setting {
+        name: "shadow_size",
+        description: "How far the shadow reaches out from the cover edge.",
+        kind: Kind::Number(DEFAULT_SHADOW_SIZE),
+    },
+    Setting {
+        name: "shadow_fade",
+        description: "Solid color for this many px before the shadow starts fading.",
+        kind: Kind::Number(DEFAULT_SHADOW_FADE),
+    },
+    Setting {
+        name: "overlay_color",
+        description: "Screen darkening while the chosen game starts up.",
+        kind: Kind::Color(DEFAULT_OVERLAY_COLOR),
+    },
+    Setting {
+        name: "loading_ring_color",
+        description: "Progress line under a game that's starting; blank derives it from \
+                      accent_color.",
+        kind: Kind::Color(DEFAULT_LOADING_RING_COLOR),
+    },
+    Setting {
+        name: "loading_text_color",
+        description: "Status line under the progress line; blank derives it from accent_color.",
+        kind: Kind::Color(DEFAULT_LOADING_TEXT_COLOR),
+    },
+    Setting {
+        name: "loading_text_gap",
+        description: "Pixels between the progress line and the text under it.",
+        kind: Kind::Number(DEFAULT_LOADING_TEXT_GAP),
+    },
+    Setting {
+        name: "error_border_color",
+        description: "Border color on a cover that failed to launch.",
+        kind: Kind::Color(DEFAULT_ERROR_BORDER_COLOR),
+    },
+    Setting {
+        name: "error_border_width",
+        description: "Width of that border.",
+        kind: Kind::Number(DEFAULT_ERROR_BORDER_WIDTH),
+    },
+    Setting {
+        name: "error_text_color",
+        description: "Color of the failure message under the cover.",
+        kind: Kind::Color(DEFAULT_ERROR_TEXT_COLOR),
+    },
+    Setting {
+        name: "missing_sign_color",
+        description: "Sign color over a game whose exe isn't on the cartridge.",
+        kind: Kind::Color(DEFAULT_MISSING_SIGN_COLOR),
+    },
+    Setting {
+        name: "missing_dim",
+        description: "Brightness multiplier for a missing game's cover (1 = untouched, \
+                      0 = black).",
+        kind: Kind::Number(DEFAULT_MISSING_DIM),
+    },
+    Setting {
+        name: "toolbar_color",
+        description: "Toolbar text and outlines; blank derives them from accent_color.",
+        kind: Kind::Color(DEFAULT_TOOLBAR_COLOR),
+    },
+    Setting {
+        name: "scrollbar_color",
+        description: "The bar under a row too long to fit; blank derives it from \
+                      secondary_color.",
+        kind: Kind::Color(DEFAULT_SCROLLBAR_COLOR),
+    },
+    Setting {
+        name: "cursor_color",
+        description: "The ring drawn in place of the mouse pointer; blank picks white or black \
+                      per cover.",
+        kind: Kind::Color(DEFAULT_CURSOR_COLOR),
+    },
+    Setting {
+        name: "background_effect",
+        description: "Movement behind the covers: \"simple\", \"particles\" or \"fog\".",
+        kind: Kind::OneOf(DEFAULT_BACKGROUND_EFFECT, &BACKGROUND_EFFECTS),
+    },
+    Setting {
+        name: "background_effect_color",
+        description: "What that movement is made of; blank derives it from the palette.",
+        kind: Kind::Color(DEFAULT_BACKGROUND_EFFECT_COLOR),
+    },
+    Setting {
+        name: "cover_opacity",
+        description: "How opaque a cover is while it isn't the one pointed at (1 = solid).",
+        kind: Kind::Unit(DEFAULT_COVER_OPACITY),
+    },
+    Setting {
+        name: "show_console_window",
+        // Off by default: a console game's window is ugly but harmless, and
+        // hiding it is one fewer thing between "chose a cover" and "game's on".
+        description: "Show the console window a console-mode game would normally open.",
+        kind: Kind::Flag(false),
+    },
+    Setting {
+        name: "order_mode",
+        description: "Cover order: \"usage\", \"alphabetic\", \"catalog\" or \"user\".",
+        kind: Kind::OneOf(DEFAULT_ORDER_MODE, &order::MODES),
+    },
+    Setting {
+        name: "usage_order",
+        description: "Most recently played first; the launcher keeps this up to date.",
+        kind: Kind::Ids,
+    },
+    Setting {
+        name: "user_order",
+        description: "Hand-arranged order, used when order_mode = \"user\".",
+        kind: Kind::Ids,
+    },
+];
+
+// ========== The Settings Themselves ==========
+
 pub struct Config {
     pub show_captions: bool,
-    // Look-and-feel knobs, all read from config.toml (with the DEFAULT_*
-    // fallbacks in `constants`). Numeric values are CSS pixels; colors are any
-    // CSS color string. border_gap and image_gap also feed the window-sizing
-    // math in `window`.
+    // Look-and-feel knobs, all read from config.toml. Numeric values are CSS
+    // pixels; colors are any CSS color string. border_gap and image_gap also
+    // feed the window-sizing math in `window`.
     pub border_gap: f64,
     pub image_gap: f64,
     pub corner_radius: f64,
     pub window_corner_radius: f64,
-    /// The palette, 60 / 30 / 10. See [`crate::constants`] for what each one
-    /// covers; the page works the in-between shades out from these three.
+    /// The palette, 60 / 30 / 10. The page works the in-between shades out from
+    /// these three.
     pub primary_color: String,
     pub secondary_color: String,
     pub accent_color: String,
@@ -61,69 +235,128 @@ pub struct Config {
     pub toolbar_color: String,
     pub scrollbar_color: String,
     pub cursor_color: String,
-    /// One of [`crate::constants::BACKGROUND_EFFECTS`], and the color the
-    /// effect is built out of — blank meaning "work it out from the palette".
+    /// One of `BACKGROUND_EFFECTS`, and the color the effect is built out of —
+    /// blank meaning "work it out from the palette".
     pub background_effect: String,
     pub background_effect_color: String,
     pub cover_opacity: f64,
     pub show_console_window: bool,
-    // The order the covers are shown in. Unlike everything above, these three
-    // are written back by the launcher as well as read — see `store` and
-    // [`crate::order`]. The two id lists are stored exactly as the file had
-    // them; `order::normalize` is what makes them usable, at the point of use.
+    // The cover order. Unlike everything above, these three are written back by
+    // the launcher as well as read. The id lists are stored exactly as the file
+    // had them; `order::normalize` makes them usable at the point of use.
     pub order_mode: String,
     pub usage_order: Vec<usize>,
     pub user_order: Vec<usize>,
 }
 
 impl Default for Config {
+    // `default` is fixed by the Default trait, so it keeps rustc's spelling.
     fn default() -> Self {
-        Config {
+        // Zeroed, then filled from SETTINGS below. Writing the real defaults
+        // here as well would be the second copy of the same table.
+        let mut config = Config {
             show_captions: false,
-            border_gap: DEFAULT_BORDER_GAP,
-            image_gap: DEFAULT_IMAGE_GAP,
-            corner_radius: DEFAULT_CORNER_RADIUS,
-            window_corner_radius: DEFAULT_WINDOW_CORNER_RADIUS,
-            primary_color: DEFAULT_PRIMARY_COLOR.to_string(),
-            secondary_color: DEFAULT_SECONDARY_COLOR.to_string(),
-            accent_color: DEFAULT_ACCENT_COLOR.to_string(),
-            shadow_size: DEFAULT_SHADOW_SIZE,
-            shadow_fade: DEFAULT_SHADOW_FADE,
-            error_border_color: DEFAULT_ERROR_BORDER_COLOR.to_string(),
-            error_border_width: DEFAULT_ERROR_BORDER_WIDTH,
-            error_text_color: DEFAULT_ERROR_TEXT_COLOR.to_string(),
-            missing_sign_color: DEFAULT_MISSING_SIGN_COLOR.to_string(),
-            missing_dim: DEFAULT_MISSING_DIM,
-            overlay_color: DEFAULT_OVERLAY_COLOR.to_string(),
-            loading_ring_color: DEFAULT_LOADING_RING_COLOR.to_string(),
-            loading_text_color: DEFAULT_LOADING_TEXT_COLOR.to_string(),
-            loading_text_gap: DEFAULT_LOADING_TEXT_GAP,
-            toolbar_color: DEFAULT_TOOLBAR_COLOR.to_string(),
-            scrollbar_color: DEFAULT_SCROLLBAR_COLOR.to_string(),
-            cursor_color: DEFAULT_CURSOR_COLOR.to_string(),
-            background_effect: DEFAULT_BACKGROUND_EFFECT.to_string(),
-            background_effect_color: DEFAULT_BACKGROUND_EFFECT_COLOR.to_string(),
-            cover_opacity: DEFAULT_COVER_OPACITY,
-            // Off by default: a console game's window is ugly but harmless, and
-            // hiding it is one fewer thing standing between "chose a cover" and
-            // "game's on screen".
+            border_gap: 0.0,
+            image_gap: 0.0,
+            corner_radius: 0.0,
+            window_corner_radius: 0.0,
+            primary_color: String::new(),
+            secondary_color: String::new(),
+            accent_color: String::new(),
+            shadow_size: 0.0,
+            shadow_fade: 0.0,
+            error_border_color: String::new(),
+            error_border_width: 0.0,
+            error_text_color: String::new(),
+            missing_sign_color: String::new(),
+            missing_dim: 0.0,
+            overlay_color: String::new(),
+            loading_ring_color: String::new(),
+            loading_text_color: String::new(),
+            loading_text_gap: 0.0,
+            toolbar_color: String::new(),
+            scrollbar_color: String::new(),
+            cursor_color: String::new(),
+            background_effect: String::new(),
+            background_effect_color: String::new(),
+            cover_opacity: 0.0,
             show_console_window: false,
-            order_mode: DEFAULT_ORDER_MODE.to_string(),
+            order_mode: String::new(),
             // Empty is the honest starting state, and `order::normalize` turns
-            // it into plain catalog order — so a cartridge nobody has played
-            // yet shows its covers the way its author listed them.
+            // it into plain catalog order — so a cartridge nobody has played yet
+            // shows its covers the way its author listed them.
             usage_order: Vec::new(),
             user_order: Vec::new(),
+        };
+        for setting in SETTINGS {
+            // `None` for the found value means "no file said otherwise", so
+            // every slot takes the default out of its own `Kind`.
+            config.apply(setting, None);
+        }
+        config
+    }
+}
+
+impl Config {
+    /// Writes one setting into its field: the value from `found` if it is
+    /// usable, and the setting's own default otherwise.
+    ///
+    /// The match arms are the entire mapping from TOML key to struct field, so
+    /// there is no second list of names to keep in step with `SETTINGS`.
+    fn apply(&mut self, setting: &Setting, found: Option<&toml::Value>) {
+        // Closures rather than three calls each: the readers all need the same
+        // two arguments, and this keeps the arms below to one line apiece.
+        let flag = || readFlag(&setting.kind, found);
+        let number = || readNumber(&setting.kind, found);
+        let text = || readText(&setting.kind, found);
+
+        match setting.name {
+            "show_captions" => self.show_captions = flag(),
+            "border_gap" => self.border_gap = number(),
+            "image_gap" => self.image_gap = number(),
+            "corner_radius" => self.corner_radius = number(),
+            "window_corner_radius" => self.window_corner_radius = number(),
+            "primary_color" => self.primary_color = text(),
+            "secondary_color" => self.secondary_color = text(),
+            "accent_color" => self.accent_color = text(),
+            "shadow_size" => self.shadow_size = number(),
+            "shadow_fade" => self.shadow_fade = number(),
+            "overlay_color" => self.overlay_color = text(),
+            "loading_ring_color" => self.loading_ring_color = text(),
+            "loading_text_color" => self.loading_text_color = text(),
+            "loading_text_gap" => self.loading_text_gap = number(),
+            "error_border_color" => self.error_border_color = text(),
+            "error_border_width" => self.error_border_width = number(),
+            "error_text_color" => self.error_text_color = text(),
+            "missing_sign_color" => self.missing_sign_color = text(),
+            "missing_dim" => self.missing_dim = number(),
+            "toolbar_color" => self.toolbar_color = text(),
+            "scrollbar_color" => self.scrollbar_color = text(),
+            "cursor_color" => self.cursor_color = text(),
+            "background_effect" => self.background_effect = text(),
+            "background_effect_color" => self.background_effect_color = text(),
+            "cover_opacity" => self.cover_opacity = number(),
+            "show_console_window" => self.show_console_window = flag(),
+            "order_mode" => self.order_mode = text(),
+            "usage_order" => self.usage_order = readIds(found),
+            "user_order" => self.user_order = readIds(found),
+            // Unreachable while SETTINGS and this match agree. A new entry in
+            // one and not the other does nothing rather than failing to build.
+            _ => {}
         }
     }
 }
 
-/// Reads config.toml (already seeded by `content::ensure_layout`). Unknown keys
-/// and unusable values are ignored, leaving that setting at its default, so an
-/// older config.toml (or a typo in one value) still yields a usable launcher.
+// ========== Reading ==========
+
+/// Reads `config.toml` under `base_dir`, already seeded by
+/// `content::ensureLayout`. Unknown keys and unusable values are ignored,
+/// leaving that setting at its default.
 pub fn load(base_dir: &Path) -> Config {
     let mut config = Config::default();
 
+    // Two `let else` bail-outs: a missing file and unparseable TOML both mean
+    // "run entirely on defaults", which `config` already is.
     let Ok(contents) = fs::read_to_string(base_dir.join("config.toml")) else {
         return config;
     };
@@ -131,172 +364,113 @@ pub fn load(base_dir: &Path) -> Config {
         return config;
     };
 
-    if let Some(value) = table.get("show_captions").and_then(|v| v.as_bool()) {
-        config.show_captions = value;
+    for setting in SETTINGS {
+        config.apply(setting, table.get(setting.name));
     }
-    set_f64(&mut config.border_gap, table.get("border_gap"));
-    set_f64(&mut config.image_gap, table.get("image_gap"));
-    set_f64(&mut config.corner_radius, table.get("corner_radius"));
-    set_f64(
-        &mut config.window_corner_radius,
-        table.get("window_corner_radius"),
-    );
-    // The palette, with the two keys it replaced standing in where they were
-    // set. A cartridge written before the trio existed said `background_color`
-    // and `shadow_color`; those meant the same two surfaces, so reading them
-    // here is what keeps such a cartridge looking as it did. The new names win
-    // when both are present.
-    set_color(&mut config.primary_color, table.get("background_color"));
-    set_color(&mut config.primary_color, table.get("primary_color"));
-    set_color(&mut config.secondary_color, table.get("shadow_color"));
-    set_color(&mut config.secondary_color, table.get("secondary_color"));
-    set_color(&mut config.accent_color, table.get("accent_color"));
-    set_f64(&mut config.shadow_size, table.get("shadow_size"));
-    set_f64(&mut config.shadow_fade, table.get("shadow_fade"));
-    set_color(
-        &mut config.error_border_color,
-        table.get("error_border_color"),
-    );
-    set_f64(
-        &mut config.error_border_width,
-        table.get("error_border_width"),
-    );
-    set_color(&mut config.error_text_color, table.get("error_text_color"));
-    set_color(
-        &mut config.missing_sign_color,
-        table.get("missing_sign_color"),
-    );
-    set_f64(&mut config.missing_dim, table.get("missing_dim"));
-    set_color(&mut config.overlay_color, table.get("overlay_color"));
-    set_color(
-        &mut config.loading_ring_color,
-        table.get("loading_ring_color"),
-    );
-    set_color(
-        &mut config.loading_text_color,
-        table.get("loading_text_color"),
-    );
-    set_f64(&mut config.loading_text_gap, table.get("loading_text_gap"));
-    set_color(&mut config.toolbar_color, table.get("toolbar_color"));
-    set_color(&mut config.scrollbar_color, table.get("scrollbar_color"));
-    set_color(&mut config.cursor_color, table.get("cursor_color"));
-    set_effect(&mut config.background_effect, table.get("background_effect"));
-    set_color(
-        &mut config.background_effect_color,
-        table.get("background_effect_color"),
-    );
-    set_unit(&mut config.cover_opacity, table.get("cover_opacity"));
-    if let Some(value) = table.get("show_console_window").and_then(|v| v.as_bool()) {
-        config.show_console_window = value;
+
+    // The two keys the palette replaced, honoured only where the new name is
+    // absent — so a cartridge written before the trio existed still looks as it
+    // did, and the new name wins whenever both are present.
+    for (old, new) in [
+        ("background_color", "primary_color"),
+        ("shadow_color", "secondary_color"),
+    ] {
+        if !table.contains_key(new)
+            && let Some(setting) = SETTINGS.iter().find(|s| s.name == new)
+        {
+            config.apply(setting, table.get(old));
+        }
     }
-    set_mode(&mut config.order_mode, table.get("order_mode"));
-    set_ids(&mut config.usage_order, table.get("usage_order"));
-    set_ids(&mut config.user_order, table.get("user_order"));
 
     config
 }
 
-/// Overwrites `slot` only if `value` is a non-negative TOML number (written
-/// either as an integer or a float), so a missing or garbled entry leaves the
-/// default in place rather than zeroing it.
-fn set_f64(slot: &mut f64, value: Option<&toml::Value>) {
-    let parsed = match value {
+/// A boolean, or the setting's default when `found` is missing or wrong-typed.
+fn readFlag(kind: &Kind, found: Option<&toml::Value>) -> bool {
+    let Kind::Flag(default) = kind else {
+        return false;
+    };
+    found.and_then(|v| v.as_bool()).unwrap_or(*default)
+}
+
+/// A non-negative, finite number, or the setting's default. A `Unit` is then
+/// clamped to 0..=1 rather than being rejected above it.
+fn readNumber(kind: &Kind, found: Option<&toml::Value>) -> f64 {
+    let (default, clamp) = match kind {
+        Kind::Number(default) => (*default, false),
+        Kind::Unit(default) => (*default, true),
+        _ => return 0.0,
+    };
+    // Integer and Float are separate TOML types, and a config may spell the
+    // same knob either way.
+    let parsed = match found {
         Some(toml::Value::Integer(n)) => *n as f64,
         Some(toml::Value::Float(f)) => *f,
-        _ => return,
+        _ => default,
     };
-    if parsed.is_finite() && parsed >= 0.0 {
-        *slot = parsed;
-    }
-}
-
-/// Overwrites `slot` only if `value` is a non-blank string, so a missing,
-/// empty or wrong-typed entry keeps the default color.
-fn set_color(slot: &mut String, value: Option<&toml::Value>) {
-    if let Some(color) = value.and_then(|v| v.as_str()) {
-        if !color.trim().is_empty() {
-            *slot = color.trim().to_string();
-        }
-    }
-}
-
-/// A proportion, where 1 means "untouched". [`set_f64`] with the top end closed
-/// as well: a value above 1 is clamped rather than ignored, because "more solid
-/// than solid" has an obvious intent and dropping it would silently leave the
-/// default instead of honouring it.
-fn set_unit(slot: &mut f64, value: Option<&toml::Value>) {
-    let mut parsed = *slot;
-    set_f64(&mut parsed, value);
-    *slot = parsed.clamp(0.0, 1.0);
-}
-
-/// Overwrites `slot` only if `value` names one of [`BACKGROUND_EFFECTS`]. Same
-/// rule as [`set_mode`] below, and the same reason: a typo costs this one
-/// setting and leaves the flat field, which is the option that changes nothing.
-fn set_effect(slot: &mut String, value: Option<&toml::Value>) {
-    if let Some(name) = value.and_then(|v| v.as_str()) {
-        let name = name.trim();
-        if BACKGROUND_EFFECTS.contains(&name) {
-            *slot = name.to_string();
-        }
-    }
-}
-
-/// Overwrites `slot` only if `value` names one of [`order::MODES`]. A typo
-/// (`"alphabetical"`, say) leaves the default in force rather than picking one
-/// of the four arbitrarily — the same "one bad value costs one setting" rule
-/// the rest of this file follows.
-fn set_mode(slot: &mut String, value: Option<&toml::Value>) {
-    if let Some(name) = value.and_then(|v| v.as_str()) {
-        let name = name.trim();
-        if order::is_mode(name) {
-            *slot = name.to_string();
-        }
-    }
-}
-
-/// Reads an id list, keeping the entries that are non-negative integers and
-/// silently dropping the rest.
-///
-/// No bounds or duplicate checking here: how many games there are is not this
-/// module's business, and the list is only ever *used* through
-/// [`order::normalize`], which repairs it against the real count. This is just
-/// "which numbers were actually in the file".
-fn set_ids(slot: &mut Vec<usize>, value: Option<&toml::Value>) {
-    let Some(array) = value.and_then(|v| v.as_array()) else {
-        return;
+    // NaN and infinity would poison the layout arithmetic downstream, and a
+    // negative gap is not a gap.
+    let value = if parsed.is_finite() && parsed >= 0.0 {
+        parsed
+    } else {
+        default
     };
-    *slot = array
+    if clamp { value.clamp(0.0, 1.0) } else { value }
+}
+
+/// A trimmed, non-blank string, or the setting's default. For a `OneOf`, a
+/// value outside the allowed set is treated exactly like a missing one.
+fn readText(kind: &Kind, found: Option<&toml::Value>) -> String {
+    let (default, allowed) = match kind {
+        Kind::Color(default) => (*default, None),
+        Kind::OneOf(default, allowed) => (*default, Some(*allowed)),
+        _ => return String::new(),
+    };
+    found
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        // `is_none_or`: a Color accepts anything non-blank, while a OneOf has
+        // to name a member of its list.
+        .filter(|text| allowed.is_none_or(|allowed| allowed.contains(text)))
+        .unwrap_or(default)
+        .to_string()
+}
+
+/// An id list, keeping the entries that are non-negative integers and silently
+/// dropping the rest. Only ever "which numbers were in the file".
+fn readIds(found: Option<&toml::Value>) -> Vec<usize> {
+    let Some(array) = found.and_then(|v| v.as_array()) else {
+        return Vec::new();
+    };
+    array
         .iter()
         .filter_map(|entry| entry.as_integer())
+        // A negative id is not an index; `try_from` drops it along with
+        // anything too large for this platform's usize.
         .filter_map(|id| usize::try_from(id).ok())
-        .collect();
+        .collect()
 }
 
-/// An id list as [`store`] wants it: a TOML array of integers, on one line.
-///
-/// A cartridge's whole catalog fits comfortably on one line, and an order is
-/// read as a sequence — `[2, 0, 1]` says what it means at a glance in a way the
-/// same numbers down a column do not.
+// ========== Writing ==========
+
+/// An id list as `store` wants it: a TOML array of integers, on one line.
+/// A whole catalog fits on one line, and `[2, 0, 1]` says what it means at a
+/// glance in a way the same numbers down a column do not.
 pub fn ids(list: &[usize]) -> toml_edit::Value {
     let mut array: toml_edit::Array = list.iter().map(|&id| id as i64).collect();
+    // Resets the per-entry decor `collect` leaves behind, which is what keeps
+    // the array on one line.
     array.fmt();
     array.into()
 }
 
-/// Writes one top-level key back to `config.toml`, leaving every comment, blank
-/// line and unrelated value exactly as it was.
+/// Writes one top-level key back to `config.toml` under `base_dir`, leaving
+/// every comment, blank line and unrelated value exactly as it was. Only the
+/// three order keys ever come through here.
 ///
-/// Only the three order keys ever come through here (see the module docs). A
-/// key already in the file is edited in place, keeping the comment above it; one
-/// that isn't — a cartridge written before the key existed, where `sync_defaults`
-/// has only left a commented-out line — is appended with its description, which
-/// is the same treatment a knob gets the first time it is set.
-///
-/// Never fatal, and never even complained about beyond a log line. A cartridge
-/// can perfectly well sit on a write-protected stick, and a launcher that
-/// refused to start a game because it could not record having started one would
-/// have its priorities backwards.
+/// Never fatal, and reported only as a log line: a cartridge can sit on a
+/// write-protected stick.
 pub fn store(base_dir: &Path, key: &str, value: toml_edit::Value) {
     let path = base_dir.join("config.toml");
     let Ok(contents) = fs::read_to_string(&path) else {
@@ -306,6 +480,8 @@ pub fn store(base_dir: &Path, key: &str, value: toml_edit::Value) {
         );
         return;
     };
+    // `toml_edit`, not `toml`: this parse keeps whitespace and comments, which
+    // is the whole reason a hand-written file survives a write intact.
     let Ok(mut doc) = contents.parse::<toml_edit::DocumentMut>() else {
         // The same file `load` gave up on and ran from defaults. Rewriting it
         // would mean guessing at what the author meant; leave it for them.
@@ -319,15 +495,16 @@ pub fn store(base_dir: &Path, key: &str, value: toml_edit::Value) {
     let existed = doc.contains_key(key);
     doc[key] = toml_edit::value(value);
     if !existed {
-        // Appended at the bottom, under the same one-line description
-        // `sync_defaults` would have used — so a key the launcher sets for the
-        // first time arrives looking like the hand-written ones above it rather
-        // than tacked on. A blank line first, for the same reason.
-        let description = known_settings()
-            .into_iter()
-            .find(|(name, _, _)| *name == key)
-            .map(|(_, description, _)| description);
+        // A key the launcher sets for the first time is appended under the same
+        // description `syncDefaults` would have used, so it arrives looking like
+        // the hand-written ones above it rather than tacked on.
+        let description = SETTINGS
+            .iter()
+            .find(|setting| setting.name == key)
+            .map(|setting| setting.description);
         if let (Some(description), Some(mut new_key)) = (description, doc.key_mut(key)) {
+            // The leading `\n` is the blank line separating it from the key
+            // above; the decor is the text `toml_edit` re-emits before the key.
             new_key
                 .leaf_decor_mut()
                 .set_prefix(format!("\n# {description}\n"));
@@ -342,172 +519,14 @@ pub fn store(base_dir: &Path, key: &str, value: toml_edit::Value) {
     }
 }
 
-/// Every key `config.toml` can hold: its TOML name, a one-line description,
-/// and its default value formatted exactly as it would appear in the file.
-/// The only consumer is [`sync_defaults`] — this is not where `load` gets its
-/// defaults from, `Default for Config` above still owns those — so a knob
-/// that's missing here just doesn't get documented for an old cartridge; it
-/// still works.
-fn known_settings() -> Vec<(&'static str, &'static str, String)> {
-    vec![
-        (
-            "show_captions",
-            "Show the selected game's name on one line under the row.",
-            "false".to_string(),
-        ),
-        (
-            "border_gap",
-            "Empty space between the window edge and the covers, on all four sides.",
-            DEFAULT_BORDER_GAP.to_string(),
-        ),
-        (
-            "image_gap",
-            "Gap between adjacent covers.",
-            DEFAULT_IMAGE_GAP.to_string(),
-        ),
-        (
-            "corner_radius",
-            "How rounded each cover's corners are (0 = square).",
-            DEFAULT_CORNER_RADIUS.to_string(),
-        ),
-        (
-            "window_corner_radius",
-            "How rounded the window's own corners are (0 = square).",
-            DEFAULT_WINDOW_CORNER_RADIUS.to_string(),
-        ),
-        (
-            "primary_color",
-            "60% of the palette: the window behind everything.",
-            format!("\"{DEFAULT_PRIMARY_COLOR}\""),
-        ),
-        (
-            "secondary_color",
-            "30%: shadows, borders, and the plate behind missing cover art.",
-            format!("\"{DEFAULT_SECONDARY_COLOR}\""),
-        ),
-        (
-            "accent_color",
-            "10%: text, the selected cover, and the close button.",
-            format!("\"{DEFAULT_ACCENT_COLOR}\""),
-        ),
-        (
-            "shadow_size",
-            "How far the shadow reaches out from the cover edge.",
-            DEFAULT_SHADOW_SIZE.to_string(),
-        ),
-        (
-            "shadow_fade",
-            "Solid color for this many px before the shadow starts fading.",
-            DEFAULT_SHADOW_FADE.to_string(),
-        ),
-        (
-            "overlay_color",
-            "Screen darkening while the chosen game starts up.",
-            format!("\"{DEFAULT_OVERLAY_COLOR}\""),
-        ),
-        (
-            "loading_ring_color",
-            "Progress line under a game that's starting; blank derives it from accent_color.",
-            format!("\"{DEFAULT_LOADING_RING_COLOR}\""),
-        ),
-        (
-            "loading_text_color",
-            "Status line under the progress line; blank derives it from accent_color.",
-            format!("\"{DEFAULT_LOADING_TEXT_COLOR}\""),
-        ),
-        (
-            "loading_text_gap",
-            "Pixels between the progress line and the text under it.",
-            DEFAULT_LOADING_TEXT_GAP.to_string(),
-        ),
-        (
-            "error_border_color",
-            "Border color on a cover that failed to launch.",
-            format!("\"{DEFAULT_ERROR_BORDER_COLOR}\""),
-        ),
-        (
-            "error_border_width",
-            "Width of that border.",
-            DEFAULT_ERROR_BORDER_WIDTH.to_string(),
-        ),
-        (
-            "error_text_color",
-            "Color of the failure message under the cover.",
-            format!("\"{DEFAULT_ERROR_TEXT_COLOR}\""),
-        ),
-        (
-            "missing_sign_color",
-            "Sign color over a game whose exe isn't on the cartridge.",
-            format!("\"{DEFAULT_MISSING_SIGN_COLOR}\""),
-        ),
-        (
-            "missing_dim",
-            "Brightness multiplier for a missing game's cover (1 = untouched, 0 = black).",
-            DEFAULT_MISSING_DIM.to_string(),
-        ),
-        (
-            "toolbar_color",
-            "Toolbar text and outlines; blank derives them from accent_color.",
-            format!("\"{DEFAULT_TOOLBAR_COLOR}\""),
-        ),
-        (
-            "scrollbar_color",
-            "The bar under a row too long to fit; blank derives it from secondary_color.",
-            format!("\"{DEFAULT_SCROLLBAR_COLOR}\""),
-        ),
-        (
-            "cursor_color",
-            "The ring drawn in place of the mouse pointer; blank picks white or black per cover.",
-            format!("\"{DEFAULT_CURSOR_COLOR}\""),
-        ),
-        (
-            "background_effect",
-            "Movement behind the covers: \"simple\", \"particles\" or \"fog\".",
-            format!("\"{DEFAULT_BACKGROUND_EFFECT}\""),
-        ),
-        (
-            "background_effect_color",
-            "What that movement is made of; blank derives it from the palette.",
-            format!("\"{DEFAULT_BACKGROUND_EFFECT_COLOR}\""),
-        ),
-        (
-            "cover_opacity",
-            "How opaque a cover is while it isn't the one pointed at (1 = solid).",
-            DEFAULT_COVER_OPACITY.to_string(),
-        ),
-        (
-            "show_console_window",
-            "Show the console window a console-mode game would normally open.",
-            "false".to_string(),
-        ),
-        (
-            "order_mode",
-            "Cover order: \"usage\", \"alphabetic\", \"catalog\" or \"user\".",
-            format!("\"{DEFAULT_ORDER_MODE}\""),
-        ),
-        (
-            "usage_order",
-            "Most recently played first; the launcher keeps this up to date.",
-            "[]".to_string(),
-        ),
-        (
-            "user_order",
-            "Hand-arranged order, used when order_mode = \"user\".",
-            "[]".to_string(),
-        ),
-    ]
-}
-
-/// Appends a commented-out, already-in-effect line for every known setting
-/// missing from `config.toml` — the case where the cartridge was set up
-/// before that setting existed. Nothing about the running launcher changes
-/// (the lines are comments, and each one already names the default that was
-/// silently in force); this only makes the setting discoverable, and
-/// uncommenting the line is how you go back and pick something else.
+/// Appends a commented-out, already-in-effect line for every setting missing
+/// from the file at `config_path` — the case where the cartridge was set up
+/// before that setting existed.
 ///
-/// A no-op if the file can't be read or doesn't parse as TOML, and a no-op
-/// once every known key is present — most runs, after the first.
-pub fn sync_defaults(config_path: &Path) {
+/// Nothing about the running launcher changes: the lines are comments, and each
+/// names the default that was silently in force anyway. This only makes the
+/// setting discoverable. A no-op once every key is present, which is most runs.
+pub fn syncDefaults(config_path: &Path) {
     let Ok(contents) = fs::read_to_string(config_path) else {
         return;
     };
@@ -515,9 +534,9 @@ pub fn sync_defaults(config_path: &Path) {
         return;
     };
 
-    let missing: Vec<_> = known_settings()
-        .into_iter()
-        .filter(|(key, _, _)| !table.contains_key(*key))
+    let missing: Vec<_> = SETTINGS
+        .iter()
+        .filter(|setting| !table.contains_key(setting.name))
         .collect();
     if missing.is_empty() {
         return;
@@ -529,9 +548,28 @@ pub fn sync_defaults(config_path: &Path) {
          # commented out below and already running at the default value shown;\n\
          # uncomment and edit a line to change it.\n",
     );
-    for (key, doc, default) in missing {
-        addition.push_str(&format!("\n# {doc}\n# {key} = {default}\n"));
+    for setting in missing {
+        addition.push_str(&format!(
+            "\n# {}\n# {} = {}\n",
+            setting.description,
+            setting.name,
+            defaultText(&setting.kind)
+        ));
     }
 
+    // Appended rather than rewritten, so everything the author wrote above the
+    // marker is untouched.
     let _ = fs::write(config_path, contents + &addition);
+}
+
+/// One setting's default, formatted exactly as it would appear in the file.
+/// Only used when documenting a key an old config is missing.
+fn defaultText(kind: &Kind) -> String {
+    match kind {
+        Kind::Flag(value) => value.to_string(),
+        Kind::Number(value) | Kind::Unit(value) => value.to_string(),
+        // Quoted, because these go into the file as TOML strings.
+        Kind::Color(value) | Kind::OneOf(value, _) => format!("\"{value}\""),
+        Kind::Ids => "[]".to_string(),
+    }
 }

@@ -4,21 +4,13 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! Append-only activity log.
-//!
-//! The listener is a GUI-subsystem process with no console — on Windows it has
-//! no window either — so this file is the *only* way to find out why a
-//! cartridge didn't launch. Every ignored volume gets a line here with the
-//! reason.
-//!
-//! Logging never fails loudly: a listener that panics because it couldn't open
-//! its log is strictly worse than one that quietly stops logging, so every
-//! write error is swallowed.
+//! Resolves where this listener writes its log — beside the exe, or
+//! `%LOCALAPPDATA%\Romzeta` when that is not writable, or nowhere — and holds
+//! the handle. The writing itself is `common::log`.
 
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+// ########## THE LISTENER'S LOG ##########
+
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::settings;
 
@@ -35,117 +27,51 @@ pub struct Log {
 
 impl Log {
     /// Opens (or creates) the log at `path`, creating parent folders as needed.
+    /// `None` means no log at all and is honoured as-is.
     ///
-    /// `None` means no log at all, and is honoured as-is. A path that *can't* be
-    /// written to is different: that is the listener losing its only voice, so
-    /// rather than going quiet it retries at [`settings::fallback_log_path`]. An
-    /// *installed* listener never gets here — it lives in
-    /// `%LOCALAPPDATA%\Romzeta`, which is both writable and the very folder the
-    /// fallback names — so this is for an exe dropped by hand somewhere
-    /// read-only. Only if that fails too does it fall silent.
+    /// A path that exists but cannot be written to is different: that is the
+    /// listener losing its only voice, so it retries at the fallback under
+    /// `%LOCALAPPDATA%` before falling silent. An installed listener never gets
+    /// there — it already lives in that folder.
     pub fn open(path: Option<PathBuf>) -> Log {
         let Some(path) = path else {
             return Log { path: None };
         };
-        if let Some(path) = try_open(path) {
+        // Writability is proved once here rather than on every line, so a log
+        // that cannot be written costs nothing per device event.
+        if common::log::openAppendable(&path) {
             return Log { path: Some(path) };
         }
+        let fallback = settings::fallbackLogPath();
         Log {
-            path: try_open(settings::fallback_log_path()),
+            // `then_some` turns the bool into the Option the field holds.
+            path: common::log::openAppendable(&fallback).then_some(fallback),
         }
     }
 
     /// A log that discards everything, so the core can be exercised without
-    /// touching the filesystem.
+    /// touching the filesystem. Behind `cfg(test)` so no production path can
+    /// build one by accident.
     #[cfg(test)]
     pub fn silent() -> Log {
         Log { path: None }
     }
 
     /// Where this log is writing, if it resolved a usable path at all. For the
-    /// tray menu's "Open log" — the log itself never needs to know its own
-    /// path to append a line.
+    /// tray menu's "Open log" — appending a line never needs to know this.
     #[cfg(windows)]
     pub fn path(&self) -> Option<&Path> {
+        // `as_deref` turns `&Option<PathBuf>` into `Option<&Path>` without
+        // cloning the buffer.
         self.path.as_deref()
     }
 
-    /// Appends one timestamped line. Errors are deliberately ignored.
+    /// Appends one timestamped line. Errors are ignored; a log that cannot be
+    /// written stops the logging, not the listener.
     pub fn line(&self, message: &str) {
         let Some(path) = &self.path else {
             return;
         };
-        rotate_if_large(path);
-        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
-            let _ = writeln!(file, "{} {}", timestamp(), message);
-        }
+        common::log::appendLine(path, message, MAX_LOG_BYTES);
     }
-}
-
-/// Creates `path`'s parent folder and proves the file can be appended to,
-/// returning it only if so. Writability is checked once here rather than on
-/// every line, because a failing log must not cost anything per event.
-fn try_open(path: PathBuf) -> Option<PathBuf> {
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .is_ok()
-        .then_some(path)
-}
-
-/// Truncates the log once it exceeds [`MAX_LOG_BYTES`]. Dropping the old
-/// content outright (rather than keeping a `.1` copy) is deliberate: this is a
-/// troubleshooting trail, not an audit record, and only the recent end of it
-/// has ever been useful.
-fn rotate_if_large(path: &Path) {
-    let Ok(meta) = fs::metadata(path) else {
-        return;
-    };
-    if meta.len() > MAX_LOG_BYTES {
-        let _ = fs::write(path, b"-- log truncated --\n");
-    }
-}
-
-/// `YYYY-MM-DD HH:MM:SSZ` in UTC.
-///
-/// UTC rather than local time so this stays OS-agnostic — the alternative is a
-/// `cfg`-gated `GetLocalTime` on one platform and `libc::localtime_r` on the
-/// other, which is a lot of machinery for a log line. The trailing `Z` is there
-/// so nobody reads a timestamp as their wall clock.
-fn timestamp() -> String {
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let (year, month, day) = civil_from_days((secs / 86_400) as i64);
-    let tod = secs % 86_400;
-    format!(
-        "{year:04}-{month:02}-{day:02} {:02}:{:02}:{:02}Z",
-        tod / 3600,
-        (tod % 3600) / 60,
-        tod % 60
-    )
-}
-
-/// Days since the Unix epoch → `(year, month, day)`.
-///
-/// Howard Hinnant's `civil_from_days`, which shifts the era to start in March
-/// so the leap day lands at the end of a year and the month-length table
-/// collapses into arithmetic. Correct for any date the epoch can express, with
-/// no dependency and no platform call.
-fn civil_from_days(days: i64) -> (i64, u32, u32) {
-    let z = days + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let doe = (z - era * 146_097) as u64; // [0, 146096]
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365; // [0, 399]
-    let y = yoe as i64 + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
-    let mp = (5 * doy + 2) / 153; // [0, 11], March-based
-    let d = (doy - (153 * mp + 2) / 5 + 1) as u32; // [1, 31]
-    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32; // [1, 12]
-    (if m <= 2 { y + 1 } else { y }, m, d)
 }

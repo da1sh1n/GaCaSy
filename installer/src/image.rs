@@ -4,24 +4,11 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! Cover art: reading a picture's size without decoding it.
-//!
-//! The launcher is built around **600×900 (2:3)** covers
-//! (`COVER_NATIVE_WIDTH` / `COVER_NATIVE_HEIGHT` in
-//! `../../launcher/src/constants.rs`), and its layout fits covers by their real
-//! `naturalWidth`/`naturalHeight` — so a cover of the wrong shape doesn't break
-//! anything, it just sits at a different size to its neighbours. v1 therefore
-//! **warns and copies the file as-is** rather than resizing it, which is what
-//! keeps this module a header parser instead of an image library.
-//!
-//! Only the first few dozen bytes of the file are read, and only enough of each
-//! format to find the dimensions. Anything unrecognised returns `None` and the
-//! UI simply doesn't comment on it — a covers-must-be-recognised rule would
-//! reject formats the webview renders perfectly well.
-//!
-//! Renamed files are the norm here, not the exception: cover art is routinely an
-//! animated WebP saved as `.png`, so the format is decided by the *bytes* and
-//! the extension is never consulted.
+//! Reads pixel dimensions out of a PNG, WebP, GIF or JPEG header without
+//! decoding the image, and phrases the 2:3 shape warning. The format is decided
+//! by the bytes, not the extension.
+
+// ########## COVER DIMENSIONS ##########
 
 use std::fs::File;
 use std::io::Read;
@@ -50,11 +37,9 @@ pub fn dimensions(path: &Path) -> Option<(u32, u32)> {
     parse(&header)
 }
 
-/// A sentence about this cover's shape, or `None` when there is nothing to say.
-///
-/// Deliberately a warning and not a rejection: it is the user's cartridge, and
-/// the launcher will render whatever they give it.
-pub fn ratio_warning(path: &Path) -> Option<String> {
+/// A sentence about this cover's shape, or `None` when there is nothing to
+/// say. A warning only — the file is copied either way.
+pub fn ratioWarning(path: &Path) -> Option<String> {
     let (width, height) = dimensions(path)?;
     if width == 0 || height == 0 {
         return None;
@@ -139,8 +124,8 @@ fn jpeg(bytes: &[u8]) -> Option<(u32, u32)> {
         // something else (DHT, JPG, DAC).
         if (0xc0..=0xcf).contains(&marker) && !matches!(marker, 0xc4 | 0xc8 | 0xcc) {
             return Some((
-                le_be16(&bytes[at + 7..at + 9]),
-                le_be16(&bytes[at + 5..at + 7]),
+                leBe16(&bytes[at + 7..at + 9]),
+                leBe16(&bytes[at + 5..at + 7]),
             ));
         }
         // Standalone markers carry no length field to skip over.
@@ -148,7 +133,7 @@ fn jpeg(bytes: &[u8]) -> Option<(u32, u32)> {
             at += 2;
             continue;
         }
-        let length = le_be16(&bytes[at + 2..at + 4]) as usize;
+        let length = leBe16(&bytes[at + 2..at + 4]) as usize;
         if length < 2 {
             return None;
         }
@@ -161,7 +146,7 @@ fn be32(bytes: &[u8]) -> u32 {
     u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
 }
 
-fn le_be16(bytes: &[u8]) -> u32 {
+fn leBe16(bytes: &[u8]) -> u32 {
     u16::from_be_bytes([bytes[0], bytes[1]]) as u32
 }
 

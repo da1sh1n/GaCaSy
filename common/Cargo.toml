@@ -1,0 +1,13 @@
+[package]
+name = "common"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+
+# What all three programs need and none of them owns: log plumbing, UTF-16
+# conversion for Win32, and the x.y.z version contract. Every module here was a
+# copy living in two or three crates before it moved.
+[dependencies]
+# For the `--signature` half of the shared command line. Zero dependencies of
+# its own, so this crate stays as cheap to link as the things it serves.
+sigblock = { path = "../sigblock" }

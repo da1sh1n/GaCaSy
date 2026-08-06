@@ -4,24 +4,11 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! The game list: `catalog.json` as the page needs to see it.
-//!
-//! The file is an array of `{ name, exe, image }`, with `exe` and `image`
-//! relative to the content folder. Unlike config.toml, a broken catalog is
-//! fatal — a launcher with no game list has nothing to show.
-//!
-//! # Why `exe` and `image` are checked here, not just joined
-//!
-//! `catalog.json` is cartridge content: whoever wrote the cartridge wrote this
-//! file, and the launcher's own signature says nothing about it (see
-//! `../../SIGNING.md`, §1). `Path::join` with a rooted path (`C:\Windows\...`)
-//! or a UNC path (`\\host\share\...`) **discards the base entirely** rather than
-//! refusing, so an unchecked `exe` field is a way to name any executable on the
-//! machine or the network — and a signed, genuine launcher would run it. The
-//! installer already refuses exactly this shape when *removing* a game
-//! (`../../installer/src/catalog.rs::game_dir`); this is the same check, applied
-//! before a game is ever offered to be launched rather than only when one is
-//! deleted.
+//! Loads and validates `catalog.json` into the `Game` list the page is given,
+//! marking each entry present or missing. Rejects any `exe` or `image` path
+//! that would resolve outside the cartridge.
+
+// ########## THE GAME LIST ##########
 
 use std::fs;
 use std::path::{Component, Path};
@@ -38,7 +25,7 @@ pub struct Game {
 }
 
 /// Reads `catalog.json` from the content folder (already seeded by
-/// `content::ensure_layout`), dropping any entry whose `exe` or `image` does
+/// `content::ensureLayout`), dropping any entry whose `exe` or `image` does
 /// not stay inside it.
 pub fn load(base_dir: &Path) -> Vec<Game> {
     let path = base_dir.join("catalog.json");
@@ -50,7 +37,7 @@ pub fn load(base_dir: &Path) -> Vec<Game> {
     games
         .into_iter()
         .filter(|game| {
-            let contained = is_contained(&game.exe) && is_contained(&game.image);
+            let contained = isContained(&game.exe) && isContained(&game.image);
             if !contained {
                 log::line(
                     base_dir,
@@ -67,15 +54,13 @@ pub fn load(base_dir: &Path) -> Vec<Game> {
 }
 
 /// Whether joining `relative` onto the cartridge root can only ever land
-/// somewhere inside it.
+/// somewhere inside it. Everything that is not a plain component — a drive
+/// prefix, a UNC root, a leading `/`, a `..` — is refused.
 ///
-/// A path that is entirely [`Component::Normal`] or [`Component::CurDir`]
-/// stays inside; anything else — a drive prefix, a UNC root, a leading `/`, or
-/// a `..` that climbs back out — is refused. `..` is refused outright rather
-/// than resolved and range-checked: a symlink inside `games/` could otherwise
-/// make an in-range path resolve somewhere it does not point at all, and this
-/// crate has no need to support one game linking into another's folder.
-pub(crate) fn is_contained(relative: &str) -> bool {
+/// `..` is refused outright rather than resolved and range-checked, because a
+/// symlink inside `games/` could make an in-range path resolve somewhere it
+/// does not point at all.
+pub(crate) fn isContained(relative: &str) -> bool {
     Path::new(relative)
         .components()
         .all(|c| matches!(c, Component::Normal(_) | Component::CurDir))

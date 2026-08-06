@@ -5,6 +5,10 @@ edition = "2024"
 license = "GPL-3.0-or-later"
 
 [dependencies]
+# Log timestamps and rotation, and the x.y.z command line, shared with the
+# listener and the installer.
+common = { path = "../common" }
+
 # Reading this exe's own signature back out, for `--signature`. The signature
 # itself is put there by `xtask sign` after linking; nothing at runtime writes
 # one, and the launcher never verifies anybody — that is the listener's job.

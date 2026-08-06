@@ -67,7 +67,7 @@ build and exits.
 The "am I a dev build?" test is **"is the exe inside this crate's `target/`?"**, deliberately
 not the launcher's "is my parent folder named `output`?". The latter misreads an installed
 `…\AppData\Local\Romzeta\listener.exe` as a dev build, because that parent isn't named `output`
-either — the bug noted against `running_deployed()` in
+either — the bug noted against `runningDeployed()` in
 [`../launcher/src/content.rs`](../launcher/src/content.rs).
 
 ### Source layout
@@ -81,7 +81,7 @@ listener/
   build.rs         <- bakes keys/*.pub in as ANCHORS; no keys, no compile
   src/
     main.rs        <- entry point, folder resolution, argument handling
-    volume.rs      <- THE SHARED CORE: handle_volume(root, log)
+    volume.rs      <- THE SHARED CORE: handleVolume(root, log)
     trust.rs       <- which file to check, holding it still, and saying why not
     version.rs     <- x.y.z: its own, and a launcher's as its signature states it
     settings.rs    <- the fixed tunables and where the log goes
@@ -161,7 +161,7 @@ The asymmetry stops at the trigger. Both platforms call one OS-agnostic entry po
 trust logic exists exactly once:
 
 ```text
-handle_volume(root: &Path) -> Outcome
+handleVolume(root: &Path) -> Outcome
   read <root>/launcher.exe (locked)  →  verify signature + role  →  version from the
   signed comment  →  spawn it
 ```
@@ -341,7 +341,7 @@ same way.
   cartridges plugged in together therefore do launch two launchers, which is the honest
   reading of what the user asked for. Deduplicating that is the launcher's business, not
   this component's — but note that its mutex does **not** currently cover the cartridge
-  case: `running_deployed()` in
+  case: `runningDeployed()` in
   [`../launcher/src/content.rs`](../launcher/src/content.rs) is what `main.rs` arms the
   guard on, and it is true only when the exe's parent folder is named `output` — on a real
   cartridge the exe sits at the volume root.

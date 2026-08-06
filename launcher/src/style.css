@@ -5,59 +5,40 @@
   v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
   or <https://www.gnu.org/licenses/> for details.
 
-  ── The launcher's stylesheet ─────────────────────────────────────────────
-  Served over app:// alongside index.html and app.js. In dev these are read
-  live from src/, so edits show up on the next launch with no rebuild.
+  The launcher's stylesheet, served over app:// alongside index.html and
+  app.js. Two values here are duplicated from Rust and MUST stay in step with
+  it: --border-gap and --image-gap mirror config.toml's border_gap/image_gap,
+  which Rust sizes the window from before this page loads.
 
-  Two numbers in here are duplicated from Rust and MUST stay in step with it:
-  --border-gap and --image-gap mirror config.toml's border_gap / image_gap.
-  Rust sizes the window from them before this page loads, and layout.js fits
-  the covers into that same box from the same two numbers. See
-  src/constants.rs, whose header explains why the duplication is deliberate
-  rather than accidental.
-
-  Everything else placed in here — the toolbar, the name line, the scroll bar —
-  is the page's own business. Rust reserves no room for any of it: they sit
-  inside the margins the window already had, which is what makes the cover row
-  the same distance from all four edges.
+  Everything else placed here — toolbar, name line, scroll bar — sits inside
+  the margins the window already had, which is what keeps the cover row the
+  same distance from all four edges.
 */
 
-/* Departure Mono v1.500, by Helena Zhang, under the SIL Open Font License 1.1 —
-   the licence ships in launcher/licenses/OFL-DepartureMono.txt, which the OFL
-   requires. <https://departuremono.com/>
+/* ########## THE LAUNCHER'S STYLESHEET ########## */
 
-   Every piece of text in the launcher. A pixel face on a machine that exists to
-   be plugged in and turned on, which is the whole reason it is here.
+/* Departure Mono v1.500, by Helena Zhang, under the SIL Open Font License 1.1.
+   The licence ships in launcher/licenses/OFL-DepartureMono.txt, which the OFL
+   requires. <https://departuremono.com/> — 1,186 glyphs, covering Latin,
+   Cyrillic and Greek.
 
-   ── THE ONE RULE ───────────────────────────────────────────────────────
+   ---------- the one rule ----------
    The font's own documentation: "for pixel-perfect results, set the font size
-   to increments of 11px." That is not advice, it is the difference between the
-   face looking drawn and looking smeared, so no rule in this file states a
-   font-size of its own. Every one of them is `var(--type-unit)`, which app.js
-   computes from devicePixelRatio so the size lands on whole DEVICE pixels — an
-   11px CSS rule is 13.75 device pixels at 125% scaling, and that quarter pixel
-   is all it takes. The name line is the one rule that is not a single unit —
-   it takes two of them whole, never a size in between (see #nameplate).
+   to increments of 11px." That is the difference between the face looking
+   drawn and looking smeared, so no rule in this file states a font-size of its
+   own — every one is `var(--type-unit)`, which app.js computes from
+   devicePixelRatio so the size lands on whole DEVICE pixels. An 11px CSS rule
+   is 13.75 device pixels at 125% scaling, and that quarter pixel is all it
+   takes. #nameplate is the one exception, and it takes two whole units.
 
-   Two things follow from that, worth knowing rather than discovering:
+   Two consequences. The chrome is all one size, because the next step up the
+   11px grid is nameplate territory — what separates toolbar from status line
+   from error note is the colour ramp and the pill fill. And tracking is 0
+   everywhere, because letter-spacing in `em` resolves to fractions of a pixel
+   and walks the glyphs off the grid; if a rule needs air, give it a whole `px`.
 
-   - The chrome is all one size. On an 11px grid the next step up is 22px, which
-     is nameplate territory, so there is no size hierarchy available down here.
-     What separates the toolbar from the status line from an error note is the
-     colour ramp (--toolbar-color / --text / --error-text-color) and the pill
-     fill, and it has to stay that way.
-   - Tracking is 0, everywhere. letter-spacing in `em` resolves to fractions of
-     a pixel and walks the glyphs straight off the grid the size was chosen to
-     land on. The face is monospace and spaced for reading already. If a rule
-     ever genuinely needs air, give it a whole `px`, never an `em`.
-
-   1,186 glyphs, covering Latin, Cyrillic and Greek — so unlike the display face
-   this replaced, a game named in Russian renders in the launcher's own type
-   rather than falling through to whatever the system has.
-
-   `swap`, because the page must never wait on it: the launcher exists to be on
-   screen the moment a drive is plugged in, and a blocked first paint would
-   cost more than one unstyled frame. */
+   `swap`, because the page must never wait on it: a blocked first paint costs
+   more than one unstyled frame. */
 @font-face {
   font-family: "DepartureMono";
   src: url("fonts/DepartureMono.woff2") format("woff2");
@@ -68,7 +49,7 @@
 
 :root {
   color-scheme: dark;
-  /* ── The palette: 60 / 30 / 10 ─────────────────────────────────────
+  /* ========== The Palette: 60 / 30 / 10 ==========
      Three colours from config.toml, and two shades worked out from them.
      app.js sets all of these at startup from window.__UI__; the values
      here are the same result computed against the default palette, so a
@@ -217,7 +198,7 @@ body * {
   cursor: var(--cursor), auto;
 }
 
-/* ── The moving background ──────────────────────────────────────────────
+/* ========== The Moving Background ==========
    Behind everything and in front of nothing. The canvas inside is appended by
    backdrop.js and exists only when background_effect names an effect, so a
    cartridge on "simple" has an empty div here and nothing else. body keeps its
@@ -307,7 +288,7 @@ body * {
   transform: scale(0.97);
 }
 
-/* ── The toolbar ────────────────────────────────────────────────────── */
+/* ========== The Toolbar ========== */
 /* How the covers are ordered (left), finding one and closing the launcher
    (right). For a cartridge with no games its CONTENTS are hidden rather than
    the row itself: there is nothing to order or search, but the close button
@@ -514,7 +495,7 @@ body.user-order #arrange {
   filter: invert(1);
 }
 
-/* ── The gallery ────────────────────────────────────────────────────── */
+/* ========== The Gallery ========== */
 
 /* The box the whole layout is built around: one border gap from every window
    edge, holding the covers and nothing else. Rust sized the window as
@@ -617,7 +598,7 @@ body.scrollable #scrollbar {
   cursor: var(--cursor-drag), auto;
 }
 
-/* ── The name line ──────────────────────────────────────────────────
+/* ========== The Name Line ==========
    One line, in the bottom margin, naming the selected cover. Not a label per
    card: thirty names under thirty covers is noise, and only the one being
    pointed at is worth reading. Pinned to the window rather than placed in the
@@ -756,7 +737,7 @@ body:not(.launching) .card.selected:not(:disabled) {
   transition: transform 0.12s ease-out;
 }
 
-/* ── The recede ──────────────────────────────────────────────────────
+/* ========== The Recede ==========
    Covers that aren't the one being pointed at thin out, so the moving
    background shows through them.
 
@@ -797,7 +778,7 @@ body.launching .card.chosen img {
   opacity: 1;
 }
 
-/* ── The veil, for a game that isn't there ───────────────────────────
+/* ========== The Veil, for a Game That Isn't There ==========
    The same sheet of the page's own background, kept for the one state that
    still wants it. A missing game should not be a window onto the moving
    background: the field showing through a cover reads as an invitation, and
@@ -877,7 +858,7 @@ body.launching .card.chosen img {
   text-align: center;
 }
 
-/* ── A game whose exe isn't on the cartridge ────────────────────────── */
+/* ========== A Game Whose Exe Isn't on the Cartridge ========== */
 
 /* The same veil, held further up and never cleared: an absent game does not
    come forward for being pointed at. missing_dim reads as "1 = untouched", so
@@ -916,7 +897,7 @@ body.launching .card.chosen img {
   display: block;
 }
 
-/* ── A cover whose art couldn't be loaded ───────────────────────────── */
+/* ========== A Cover Whose Art Couldn't Be Loaded ========== */
 /* The <img> is hidden rather than left to draw the webview's own
    broken-image glyph, which sits in the corner, ignores the rounded corners
    and reads as a page that failed to load rather than as a stated fact.
@@ -937,7 +918,7 @@ body.launching .card.chosen img {
               var(--secondary);
 }
 
-/* ── A game that was chosen but failed to start ─────────────────────── */
+/* ========== A Game That Was Chosen but Failed to Start ========== */
 /* An outline rather than a border: it doesn't take part in layout, so a
    marked cover stays exactly the size the sizing math gave it. */
 
@@ -947,7 +928,7 @@ body.launching .card.chosen img {
   border-radius: calc(var(--corner-radius) * var(--cover-scale));
 }
 
-/* ── Arranging the row by hand ──────────────────────────────────────── */
+/* ========== Arranging the Row by Hand ========== */
 /* Drawn ON the cover rather than above it. The window height is decided in
    Rust before this page loads and every cover is sized to fill it; a grip
    that took a row of its own would push the covers out of the box they were
@@ -1001,7 +982,7 @@ body.arranging .card:not(:disabled):focus-visible {
   transform: scale(1.03);
 }
 
-/* ── The launch transition ──────────────────────────────────────────── */
+/* ========== The Launch Transition ========== */
 
 /* Nothing to order, search or scroll while a game is starting; the covers
    are on their way off screen anyway.
@@ -1156,7 +1137,7 @@ body.finishing .card.chosen {
   transition: transform 0.3s ease-in, opacity 0.3s ease-in;
 }
 
-/* ── Reduced motion ─────────────────────────────────────────────────── */
+/* ========== Reduced Motion ========== */
 /* Windows Settings > Accessibility > Visual effects > Animation effects.
    Fewer and gentler, not none: opacity and colour still carry meaning, and a
    launcher that gave no feedback at all would be worse than one that moved.

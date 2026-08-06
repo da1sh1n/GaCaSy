@@ -4,17 +4,12 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! Platform triggers — the only part of the listener that differs per OS.
-//!
-//! What is `cfg`-gated here is **the process lifetime**, not just which API
-//! notices a volume. The Windows trigger is resident from login to logout and
-//! blocks in `GetMessage`; the Linux trigger does not exist until udev starts
-//! it, and exits once it has acted. See `../../structure.md`
-//! ("Execution models").
-//!
-//! Both end at the same place: [`crate::volume::handle_volume`]. Nothing about
-//! signatures, versions or launching lives in this folder.
+//! Selects the platform trigger at compile time. Both halves export `run`.
 
+// ########## PLATFORM TRIGGERS ##########
+
+// Exactly one of these two is compiled, and both export `run`, so the rest of
+// the crate calls `trigger::run` without knowing which platform it is on.
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]

@@ -4,23 +4,10 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! The wizard draws in the operating system's own UI font.
-//!
-//! This is a native installer and should look like one, so instead of carrying a
-//! typeface it asks Windows which one the desktop is using and reads that file
-//! off the disk. On an English system that is Segoe UI; on a Japanese one it is
-//! Yu Gothic UI, without this file knowing either name.
-//!
-//! It is also 1.4 MB of binary that a user does not have to download. egui's
-//! `default_fonts` feature embeds four faces — Ubuntu, Hack and two emoji fonts —
-//! and the installer is the one file a user obtains over whatever connection they
-//! have. That feature is off; see installer/Cargo.toml.
-//!
-//! **One fallback, and it is the last one.** If any step of the lookup fails,
-//! [`epaint_default_fonts::UBUNTU_LIGHT`] draws the wizard instead — the same
-//! Ubuntu-Light egui would have used. It is listed behind the system font rather
-//! than swapped in for it, so it also covers any glyph the system font lacks. On
-//! a Windows with a readable `%WINDIR%\Fonts` the fallback is never reached.
+//! Resolves the desktop's UI font through the registry, reads the face file off
+//! disk, and builds the egui font definitions. Falls back to Ubuntu-Light.
+
+// ########## THE SYSTEM UI FONT ##########
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -37,7 +24,7 @@ pub fn definitions() -> FontDefinitions {
     let mut fonts = FontDefinitions::empty();
     let mut chain = Vec::new();
 
-    if let Some(bytes) = system_ui_font() {
+    if let Some(bytes) = systemUiFont() {
         // Face 0 of the file. A `.ttc` holds several — Yu Gothic UI's holds
         // Regular, Light and Semilight — and the first is the regular weight in
         // every collection Windows ships as a UI font.
@@ -69,13 +56,13 @@ pub fn definitions() -> FontDefinitions {
 /// so none of them is reported. The fallback is not a degraded mode worth warning
 /// about; it is a different typeface.
 #[cfg(windows)]
-fn system_ui_font() -> Option<Vec<u8>> {
-    let bytes = std::fs::read(face_file(&message_font_face()?)?).ok()?;
-    looks_like_a_font(&bytes).then_some(bytes)
+fn systemUiFont() -> Option<Vec<u8>> {
+    let bytes = std::fs::read(faceFile(&messageFontFace()?)?).ok()?;
+    looksLikeAFont(&bytes).then_some(bytes)
 }
 
 #[cfg(not(windows))]
-fn system_ui_font() -> Option<Vec<u8>> {
+fn systemUiFont() -> Option<Vec<u8>> {
     // No fontconfig, no CoreText. The installer only really runs on Windows; the
     // other targets exist so the non-UI half can be built and tested there.
     None
@@ -88,7 +75,7 @@ fn system_ui_font() -> Option<Vec<u8>> {
 /// is in the system's DPI, and egui does its own scaling, so reading it would
 /// mean handling two sizing schemes to end up where we already are.
 #[cfg(windows)]
-fn message_font_face() -> Option<String> {
+fn messageFontFace() -> Option<String> {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         NONCLIENTMETRICSW, SPI_GETNONCLIENTMETRICS, SystemParametersInfoW,
     };
@@ -124,17 +111,17 @@ fn message_font_face() -> Option<String> {
 /// Machine-wide fonts first, then this account's — that is the order Windows
 /// itself resolves them in, and the machine list is where every stock UI font is.
 #[cfg(windows)]
-fn face_file(face: &str) -> Option<PathBuf> {
+fn faceFile(face: &str) -> Option<PathBuf> {
     const FONTS: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts";
 
     for (root, dir) in [
-        (crate::reg::HKEY_LOCAL_MACHINE, machine_font_dir()),
-        (crate::reg::HKEY_CURRENT_USER, user_font_dir()),
+        (crate::reg::HKEY_LOCAL_MACHINE, machineFontDir()),
+        (crate::reg::HKEY_CURRENT_USER, userFontDir()),
     ] {
         let (Some(key), Some(dir)) = (crate::reg::open(root, FONTS, crate::reg::READ), dir) else {
             continue;
         };
-        let Some(value) = font_value(&key, face) else {
+        let Some(value) = fontValue(&key, face) else {
             continue;
         };
         // The machine list stores a bare filename; a per-user install stores the
@@ -154,10 +141,10 @@ fn face_file(face: &str) -> Option<PathBuf> {
 
 /// The value under the fonts key that holds `face`'s filename.
 #[cfg(windows)]
-fn font_value(key: &crate::reg::Key, face: &str) -> Option<String> {
+fn fontValue(key: &crate::reg::Key, face: &str) -> Option<String> {
     // One face, one file, named after itself. Every stock UI font is this.
     for suffix in [" (TrueType)", " (OpenType)"] {
-        if let Some(file) = crate::reg::query_sz(key, Some(&format!("{face}{suffix}"))) {
+        if let Some(file) = crate::reg::querySz(key, Some(&format!("{face}{suffix}"))) {
             return Some(file);
         }
     }
@@ -165,20 +152,20 @@ fn font_value(key: &crate::reg::Key, face: &str) -> Option<String> {
     // A collection is named after everything inside it, so there is no name to
     // ask for: `"Yu Gothic UI Regular & Yu Gothic UI Semilight & … (TrueType)"`.
     // The `&`/`(` check is what keeps "Segoe UI" from matching "Segoe UI Emoji".
-    let name = crate::reg::enum_value_names(key).into_iter().find(|name| {
+    let name = crate::reg::enumValueNames(key).into_iter().find(|name| {
         name.strip_prefix(face)
             .is_some_and(|rest| rest.starts_with(" (") || rest.starts_with(" &"))
     })?;
-    crate::reg::query_sz(key, Some(&name))
+    crate::reg::querySz(key, Some(&name))
 }
 
 #[cfg(windows)]
-fn machine_font_dir() -> Option<PathBuf> {
+fn machineFontDir() -> Option<PathBuf> {
     Some(PathBuf::from(std::env::var_os("WINDIR")?).join("Fonts"))
 }
 
 #[cfg(windows)]
-fn user_font_dir() -> Option<PathBuf> {
+fn userFontDir() -> Option<PathBuf> {
     Some(PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join(r"Microsoft\Windows\Fonts"))
 }
 
@@ -189,7 +176,7 @@ fn user_font_dir() -> Option<PathBuf> {
 /// a validation — a well-formed header over corrupt tables still gets through —
 /// but it costs four bytes and catches the case where the registry pointed us at
 /// something that isn't a font at all.
-fn looks_like_a_font(bytes: &[u8]) -> bool {
+fn looksLikeAFont(bytes: &[u8]) -> bool {
     bytes.len() > 12
         && matches!(
             bytes.first_chunk::<4>(),

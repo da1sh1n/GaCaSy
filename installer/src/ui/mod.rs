@@ -4,15 +4,11 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! The wizard: a header, one screen, a footer of actions.
-//!
-//! Every screen is a function of `&mut App` and an `egui::Ui`, and the footer is
-//! the only thing that moves between them. That shape is deliberate — the back
-//! button, the primary action and the "what is stopping this" text all live in
-//! one place, so no screen can quietly grow a different way forward.
-//!
-//! `Screen::Working` is the one screen with no way back, because the thing it is
-//! showing is a copy that is already underway. It offers cancel instead.
+//! Draws the wizard frame — header, current screen, footer — and routes to the
+//! per-screen functions. Every screen is a function of `&mut App` and an
+//! `egui::Ui`; the footer is the only part shared between them.
+
+// ########## THE WIZARD FRAME ##########
 
 mod games;
 mod listener;
@@ -20,7 +16,7 @@ mod listener;
 use crate::app::{App, Mode, Screen};
 use crate::cartridge;
 use crate::payload;
-use crate::volume::human_bytes;
+use crate::volume::humanBytes;
 
 /// Warnings and blockers. Read against both the light and dark egui themes.
 pub const WARN: egui::Color32 = egui::Color32::from_rgb(0xe0, 0xb1, 0x3a);
@@ -45,7 +41,7 @@ impl App {
     /// One frame. Called by [`crate::shell`] with the whole window to draw into.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
-        self.poll_job();
+        self.pollJob();
         for draft in &mut self.drafts {
             draft.poll();
         }
@@ -59,7 +55,7 @@ impl App {
                     ui.add_space(8.0);
                     match self.screen {
                         Screen::Home => home(self, ui),
-                        Screen::Volume => volume_screen(self, ui),
+                        Screen::Volume => volumeScreen(self, ui),
                         Screen::Games => games::screen(self, &ctx, ui),
                         Screen::Review => review(self, ui),
                         Screen::Working => working(self, ui),
@@ -150,11 +146,11 @@ fn footer(app: &mut App, ctx: &egui::Context, ui: &mut egui::Ui) {
             |ui| match app.screen {
                 Screen::Volume => {
                     if ui.button("Rescan drives").clicked() {
-                        app.refresh_volumes();
+                        app.refreshVolumes();
                     }
                 }
                 Screen::Games => match app.plan() {
-                    Ok(plan) if plan.is_empty() => {
+                    Ok(plan) if plan.isEmpty() => {
                         ui.add_enabled(false, egui::Button::new("Review"));
                         ui.label(egui::RichText::new("Nothing to do yet.").weak());
                     }
@@ -187,7 +183,7 @@ fn footer(app: &mut App, ctx: &egui::Context, ui: &mut egui::Ui) {
                             .add_enabled(!cancelling, egui::Button::new("Cancel"))
                             .clicked()
                         {
-                            job.request_cancel();
+                            job.requestCancel();
                         }
                         if cancelling {
                             ui.label(egui::RichText::new("Stopping…").weak());
@@ -232,7 +228,7 @@ fn home(app: &mut App, ui: &mut egui::Ui) {
             .add_sized([260.0, 40.0], egui::Button::new("Make or edit a cartridge"))
             .clicked()
         {
-            app.refresh_volumes();
+            app.refreshVolumes();
             app.screen = Screen::Volume;
         }
         ui.label("Write the launcher, your games and their covers onto a drive.");
@@ -244,7 +240,7 @@ fn home(app: &mut App, ui: &mut egui::Ui) {
             .add_sized([260.0, 40.0], egui::Button::new("Set up this PC"))
             .clicked()
         {
-            app.refresh_listeners();
+            app.refreshListeners();
             app.screen = Screen::Listener;
         }
         ui.vertical(|ui| {
@@ -267,14 +263,10 @@ fn home(app: &mut App, ui: &mut egui::Ui) {
     });
 }
 
-/// The drive picker. **Every row here can be picked** — `volume::list()` has
-/// already dropped the drive Windows is on and every internal disk.
-///
-/// They used to be listed, greyed out, on the grounds that a filter which
-/// silently shortens a list reads as a bug. The line below does that job
-/// instead: it says once why a drive might be missing, rather than filling the
-/// screen with `C:` and every internal disk as rows that exist to say no.
-fn volume_screen(app: &mut App, ui: &mut egui::Ui) {
+/// The drive picker. Every row shown can be picked — `volume::list()` has
+/// already dropped the drive Windows is on and every internal disk. A line
+/// under the list says once why a drive might be missing.
+fn volumeScreen(app: &mut App, ui: &mut egui::Ui) {
     if app.volumes.is_empty() {
         ui.colored_label(
             WARN,
@@ -309,7 +301,7 @@ fn volume_screen(app: &mut App, ui: &mut egui::Ui) {
         ui.add_space(4.0);
     }
     if let Some(index) = chosen {
-        app.choose_volume(index);
+        app.chooseVolume(index);
     }
 }
 
@@ -347,7 +339,7 @@ fn review(app: &mut App, ui: &mut egui::Ui) {
             ui.label(format!(
                 "  + {} — {} → games/{}/",
                 game.name,
-                human_bytes(game.bytes),
+                humanBytes(game.bytes),
                 game.slug
             ));
         }
@@ -379,16 +371,16 @@ fn review(app: &mut App, ui: &mut egui::Ui) {
     let free = app.volume().map(|v| v.free_bytes).unwrap_or(0);
     ui.label(format!(
         "{} to copy, {} free on the drive.",
-        human_bytes(plan.bytes_to_copy()),
-        human_bytes(free)
+        humanBytes(plan.bytesToCopy()),
+        humanBytes(free)
     ));
-    match app.space_shortfall(&plan) {
+    match app.spaceShortfall(&plan) {
         Some(short) => ui.colored_label(
             BAD,
             format!(
                 "That is {} short, counting {} of headroom. Remove a game or use a bigger drive.",
-                human_bytes(short),
-                human_bytes(cartridge::FREE_SPACE_SLACK)
+                humanBytes(short),
+                humanBytes(cartridge::FREE_SPACE_SLACK)
             ),
         ),
         None => ui.colored_label(GOOD, "It fits."),

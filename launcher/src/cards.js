@@ -72,10 +72,6 @@ export function select(index) {
 // The name sits under the cover it names, clamped inside the border gap so a
 // long name at either end stays on screen. Centred on the window instead would
 // put the leftmost cover's name under the middle one.
-//
-// It no longer has to give way to a card's own message: that message is drawn
-// on the art now, not in this band, so the two cannot collide and a missing
-// game keeps its name on the line.
 export function placeNameplate() {
   if (selected < 0 || !cards[selected]) return;
 

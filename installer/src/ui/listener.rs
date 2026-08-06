@@ -4,21 +4,10 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! Job 2 — the PC side, on its own screen because it is independent of the
-//! cartridge flow. Setting up a PC and making a cartridge are separate errands
-//! that happen to be shipped in one exe.
-//!
-//! There is **no choice of location** and no elevation on this screen: the
-//! listener lives in `%LOCALAPPDATA%\Romzeta` with its config and its log, and
-//! that is the whole of it. The path is still shown, because the one thing a
-//! user needs from a program with no window is to know where to look.
-//!
-//! The one thing this screen has to communicate, and the reason it is wordier
-//! than the others: **an empty key list trusts every cartridge**. That is the
-//! listener's unpaired default (`../../../listener/structure.md`), so pairing is
-//! the installer *tightening* something that starts open — not opening something
-//! that starts shut. A user who skips the key field should know which of those
-//! they just did.
+//! Draws the listener screen: install, repair and remove buttons, the install
+//! path, and the AutoPlay checkbox.
+
+// ########## THE LISTENER SCREEN ##########
 
 use crate::app::App;
 use crate::autoplay;
@@ -43,7 +32,7 @@ pub fn screen(app: &mut App, ui: &mut egui::Ui) {
     );
     ui.add_space(6.0);
 
-    match listener::install_dir() {
+    match listener::installDir() {
         Some(dir) => {
             ui.horizontal(|ui| {
                 ui.label("Goes in:");
@@ -119,7 +108,7 @@ pub fn screen(app: &mut App, ui: &mut egui::Ui) {
     );
 
     ui.add_space(12.0);
-    let blocked = listener::install_dir().is_none();
+    let blocked = listener::installDir().is_none();
     let label = if installed_here {
         "Repair / update"
     } else {
@@ -132,7 +121,7 @@ pub fn screen(app: &mut App, ui: &mut egui::Ui) {
         )
         .clicked()
     {
-        app.install_listener(&ctx);
+        app.installListener(&ctx);
     }
 }
 
@@ -147,7 +136,7 @@ fn installed(app: &mut App, ui: &mut egui::Ui) {
             "The listener is not installed. Cartridges won't auto-start.",
         );
         ui.add_space(6.0);
-        autoplay_status(ui);
+        autoplayStatus(ui);
         return;
     }
 
@@ -192,10 +181,10 @@ fn installed(app: &mut App, ui: &mut egui::Ui) {
         ui.add_space(4.0);
     }
 
-    autoplay_status(ui);
+    autoplayStatus(ui);
 
     if let Some(dir) = uninstall {
-        app.uninstall_listener(&ctx, dir);
+        app.uninstallListener(&ctx, dir);
     }
 }
 
@@ -203,14 +192,14 @@ fn installed(app: &mut App, ui: &mut egui::Ui) {
 /// state because the two together are what "plugging a cartridge in works"
 /// actually means: a listener that starts the launcher, and nothing else
 /// opening on top of it.
-fn autoplay_status(ui: &mut egui::Ui) {
+fn autoplayStatus(ui: &mut egui::Ui) {
     ui.add_space(4.0);
     if autoplay::suppressed() {
         ui.colored_label(
             GOOD,
             "Windows leaves removable drives alone — nothing opens over the launcher.",
         );
-    } else if autoplay::opens_a_folder() {
+    } else if autoplay::opensAFolder() {
         ui.colored_label(
             WARN,
             "Windows opens a folder when a drive is plugged in — it will appear over the \

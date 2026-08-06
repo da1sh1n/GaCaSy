@@ -4,19 +4,11 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! Starting a game, and waiting for it to actually come up.
-//!
-//! "Started" deliberately means *the game's window is up*, not "spawn returned
-//! Ok" — the launcher closes itself on that signal, and closing while the game
-//! is still an invisible process makes a working launch look like a broken one.
-//! On Windows that signal is `WaitForInputIdle`; everywhere else (and for
-//! console programs, which `WaitForInputIdle` refuses) it degrades to "still
-//! alive a moment later".
-//!
-//! Every attempt and its outcome goes to `logs/launcher.log` with the full OS
-//! error text — the UI only ever gets one short sentence. That, and the game's
-//! own redirected output, is [`crate::log`]'s side of the job. The timings are
-//! in [`crate::constants`].
+//! Spawns a game's executable and decides whether it actually came up — via
+//! `WaitForInputIdle` on Windows, or "still alive a moment later" elsewhere —
+//! then phrases the outcome for the page.
+
+// ########## STARTING A GAME ##########
 
 use std::path::Path;
 use std::process::{Child, Command};
@@ -36,19 +28,13 @@ pub enum Outcome {
     Failed(String),
 }
 
-/// Starts `game`'s exe.
+/// Starts `game`'s exe and hands back the running `Child`, which the caller
+/// should pass to `supervise` on a worker thread — everything after this
+/// blocks. `show_console_window` is `config.toml`'s knob of the same name.
 ///
 /// The working directory is the exe's **own folder**, not the cartridge root:
-/// games overwhelmingly resolve their assets relative to themselves, and a
-/// game started from the wrong cwd fails in ways that look like corruption.
-///
-/// On success the caller owns the [`Child`] and should hand it to
-/// [`supervise`] on a worker thread — everything from here on blocks.
-///
-/// `show_console_window` is `config.toml`'s knob of the same name: a console
-/// program otherwise pops its console window up alongside its real one (or,
-/// for a windowless stand-in, pops up *as* its only window), which is fine
-/// for a real game but ugly for a placeholder cover.
+/// games overwhelmingly resolve assets relative to themselves, and one started
+/// from the wrong cwd fails in ways that look like corruption.
 pub fn spawn(
     base: &Path,
     game: &Game,
@@ -59,7 +45,7 @@ pub fn spawn(
     // by index over IPC (see `crate::ui`), and re-deriving the containment
     // check at the one place that actually spawns something is cheaper than a
     // second path from an untrusted `catalog.json` entry to a running process.
-    if !catalog::is_contained(&game.exe) {
+    if !catalog::isContained(&game.exe) {
         log::line(
             base,
             &format!("REFUSED {}: exe path escapes the cartridge", game.name),
@@ -83,12 +69,12 @@ pub fn spawn(
     // The exe's parent always exists here (base.join of a relative path), but
     // fall back to the cartridge root rather than refusing to launch.
     let workdir = exe.parent().unwrap_or(base).to_path_buf();
-    let (stdout, stderr) = log::game_output(base, game, index);
+    let (stdout, stderr) = log::gameOutput(base, game, index);
 
     let mut command = Command::new(&exe);
     command.current_dir(&workdir).stdout(stdout).stderr(stderr);
     if !show_console_window {
-        suppress_console_window(&mut command);
+        suppressConsoleWindow(&mut command);
     }
 
     match command.spawn() {
@@ -101,7 +87,7 @@ pub fn spawn(
         }
         Err(e) => {
             log::line(base, &format!("FAILED {}: {e}", exe.display()));
-            Err(format!("Failed to start — {}", short_reason(&e)))
+            Err(format!("Failed to start — {}", shortReason(&e)))
         }
     }
 }
@@ -109,7 +95,7 @@ pub fn spawn(
 /// Blocks until the game is up (or clearly isn't). Call on a worker thread —
 /// never on the UI thread, which has a window to keep repainting.
 pub fn supervise(base: &Path, game: &Game, mut child: Child) -> Outcome {
-    match wait_for_window(&child) {
+    match waitForWindow(&child) {
         // A window came up — but hold on briefly before believing it. A game
         // that flashes an error box and quits satisfies WaitForInputIdle just
         // as well as one that is genuinely running, and so does one that was
@@ -119,7 +105,7 @@ pub fn supervise(base: &Path, game: &Game, mut child: Child) -> Outcome {
                 log::line(base, &format!("{} is up", game.name));
                 Outcome::Started
             }
-            Some(status) => finished_early(base, game, status),
+            Some(status) => finishedEarly(base, game, status),
         },
         Window::TimedOut => {
             // Not a failure. Saying otherwise would punish slow games, and the
@@ -140,13 +126,13 @@ pub fn supervise(base: &Path, game: &Game, mut child: Child) -> Outcome {
                 log::line(base, &format!("{} is running", game.name));
                 Outcome::Started
             }
-            Some(status) => finished_early(base, game, status),
+            Some(status) => finishedEarly(base, game, status),
         },
     }
 }
 
 /// A game that was gone before we ever reported it as started.
-fn finished_early(base: &Path, game: &Game, status: std::process::ExitStatus) -> Outcome {
+fn finishedEarly(base: &Path, game: &Game, status: std::process::ExitStatus) -> Outcome {
     // Exit code 0 in the first couple of seconds is odd but not an error — a
     // stub that hands off to another process does exactly this.
     if status.success() {
@@ -195,7 +181,7 @@ enum Window {
 /// Waits for the process to finish initialising and start pumping messages,
 /// which in practice means "its first window is on screen".
 #[cfg(windows)]
-fn wait_for_window(child: &Child) -> Window {
+fn waitForWindow(child: &Child) -> Window {
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::System::Threading::WaitForInputIdle;
 
@@ -214,7 +200,7 @@ fn wait_for_window(child: &Child) -> Window {
 }
 
 #[cfg(not(windows))]
-fn wait_for_window(_child: &Child) -> Window {
+fn waitForWindow(_child: &Child) -> Window {
     Window::Unsupported
 }
 
@@ -223,7 +209,7 @@ fn wait_for_window(_child: &Child) -> Window {
 /// one — only a console program (typically a stand-in cover, since a real
 /// game is GUI) is ever affected.
 #[cfg(windows)]
-fn suppress_console_window(command: &mut Command) {
+fn suppressConsoleWindow(command: &mut Command) {
     use std::os::windows::process::CommandExt;
 
     // windows_sys::Win32::System::Threading::CREATE_NO_WINDOW, spelled out
@@ -233,11 +219,11 @@ fn suppress_console_window(command: &mut Command) {
 }
 
 #[cfg(not(windows))]
-fn suppress_console_window(_command: &mut Command) {}
+fn suppressConsoleWindow(_command: &mut Command) {}
 
 /// Maps an OS spawn error to something worth showing a player. Anything beyond
 /// the two everyday causes points at the log rather than guessing.
-fn short_reason(error: &std::io::Error) -> &'static str {
+fn shortReason(error: &std::io::Error) -> &'static str {
     match error.kind() {
         std::io::ErrorKind::NotFound => "file not found",
         std::io::ErrorKind::PermissionDenied => "access denied",

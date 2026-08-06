@@ -4,120 +4,83 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! Whether a binary may be run, and what it turned out to be.
-//!
-//! Two programs decide this: the listener, before starting a launcher off a
-//! volume that just arrived, and the installer, before believing anything about
-//! a `launcher.exe` already sitting on a cartridge. They used to decide it
-//! differently — the listener verified a signature, and the installer executed
-//! the file and asked. That is not a difference of opinion, it is the second
-//! one being wrong, and the reason it was wrong is that the check lived in the
-//! listener rather than anywhere both could reach.
-//!
-//! So it lives here, and there is exactly one of it.
-//!
-//! # What a signature actually establishes
-//!
-//! [`attest`] answers three questions, in this order, and the order is the
-//! point:
-//!
-//! 1. **Is this signed by a key we trust?** Ed25519 over the whole binary, via
-//!    [`minisign_verify`]. Until this passes, nothing else on the file means
-//!    anything.
-//! 2. **What does it say it is?** minisign signs a *trusted comment* alongside
-//!    the payload — a second signature over `signature ‖ comment`, checked by
-//!    the same `verify` call as step 1. `xtask` writes `<role> <version> <date>`
-//!    there. Because it is covered by that second signature, it is as
-//!    unforgeable as the payload; because it is *only* covered once step 1 has
-//!    passed, reading it before then would be reading attacker-controlled text.
-//! 3. **Is that the thing we asked for?** A signed `installer.exe` is a
-//!    perfectly genuine Romzeta binary and is not a launcher. Without this step
-//!    the trust decision is "signed by us", which is not the same as "is the
-//!    program the caller is about to run" — see [`Refusal::WrongRole`].
-//!
-//! # What it does not establish
-//!
-//! Only that *this file* is ours and unmodified. The signature says nothing
-//! about the `catalog.json`, `config.toml`, `images/` or `games/` sitting
-//! beside it on the same disk — those are written by whoever made the cartridge,
-//! on a machine that holds no signing key, so there is nothing that could have
-//! signed them. A launcher must therefore treat the content next to it as
-//! untrusted input no matter how it was started. See `SIGNING.md`, §1.
+//! Verifies a binary against a set of public keys and checks the role its
+//! signed comment declares, returning what the signature says or why it was
+//! refused. Covers that file only; anything beside it on disk is unsigned.
 
-/// One public key a build accepts, and a name for it so the log can say which.
+// Functions are camelCase in this project while variables stay snake_case,
+// which rustc's default lints object to. Silenced once, at the crate root.
+#![allow(non_snake_case)]
+
+// ########## THE TRUST DECISION ##########
+
+// ========== What A Build Accepts ==========
+
+/// One public key a build will accept, plus a name for it so the log can say
+/// which one let a binary through.
 ///
-/// Borrowed rather than owned because the shipped programs get theirs from a
-/// `const` their build script generated — see `listener/build.rs`. A trust
-/// anchor in a writable file beside the exe would let anything that could edit
-/// that file grant itself auto-run, so there is deliberately no way to load one
-/// at runtime.
+/// The fields are borrowed: the shipped programs get theirs from a `const`
+/// their build script generated (see `listener/build.rs`). There is no runtime
+/// path for loading an anchor.
 pub struct Anchor<'a> {
     pub name: &'a str,
     pub base64: &'a str,
 }
 
 impl Anchor<'_> {
-    /// Whether this anchor is a key [`attest`] could actually use.
-    ///
-    /// Exists so that the programs carrying baked-in anchors can assert their
-    /// build script produced something usable without linking a verifier
-    /// themselves — a listener whose generated anchors do not parse would
+    /// Whether this anchor parses as a key `attest` could actually use.
+    /// Lets a program assert its build script produced something usable without
+    /// linking a verifier itself — anchors that do not parse would otherwise
     /// refuse every cartridge in existence, one puzzled log line at a time.
-    pub fn is_usable(&self) -> bool {
+    pub fn isUsable(&self) -> bool {
         minisign_verify::PublicKey::from_base64(self.base64).is_ok()
     }
 }
 
-/// The role names `xtask` writes into the trusted comment, and the ones
-/// [`attest`] matches against.
-///
-/// Here rather than in `xtask` alone because a signer and a checker that
-/// disagree about this string produce a cartridge that is silently ignored by
-/// every listener on earth. One definition, two users, no drift.
+/// The role names `xtask` writes into the trusted comment and `attest` matches
+/// against. Defined here, where both the signer and the checker can see them: a
+/// disagreement about this string makes a cartridge every listener ignores.
 pub const LAUNCHER_ROLE: &str = "romzeta-launcher";
 pub const LISTENER_ROLE: &str = "romzeta-listener";
 pub const INSTALLER_ROLE: &str = "romzeta-installer";
 
-/// What a verified signature says about the binary it came from.
-///
-/// Every field here is covered by a signature that has already been checked, so
-/// unlike anything else about a file off a stranger's disk, it is safe to
-/// believe.
+// ========== The Two Outcomes ==========
+
+/// What a verified signature says about the binary it came from. Every field is
+/// covered by a signature that has already been checked, so unlike anything else
+/// about a file off a stranger's disk it is safe to believe.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Attested {
     /// Which anchor accepted it — `release` or `dev`, for the log line.
     pub anchor: String,
-    /// The role from the trusted comment. Always equal to the `expected_role`
-    /// passed to [`attest`]; carried anyway so a caller logging the result does
-    /// not have to remember what it asked for.
+    /// The role from the trusted comment, always equal to the `expected_role`
+    /// that was asked for. Carried anyway so a caller logging the result does
+    /// not have to remember what it passed in.
     pub role: String,
-    /// The `x.y.z` from the trusted comment, unparsed — each program has its own
-    /// `Version` type and its own strictness about what it will accept, and this
-    /// crate has no business picking one.
+    /// The `x.y.z` from the trusted comment, left unparsed — each program has
+    /// its own strictness about what it accepts, and this crate does not pick.
     pub version: String,
 }
 
-/// Why a binary is not one we will run.
-///
-/// Distinct variants because the log is the only diagnostic these programs
-/// have, and "ordinary USB stick" and "someone renamed our installer" must not
-/// read alike.
+/// Why a binary is not one we will run. Separate variants because the log is
+/// the only diagnostic these programs have, and "ordinary USB stick" must not
+/// read like "someone renamed our installer".
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Refusal {
-    /// No signature block at all — a self-built or stripped binary, or any
+    /// No signature block at all — a self-built or stripped binary, or an
     /// unrelated file that happens to have the right name.
     Unsigned,
-    /// A block is there but is not a minisign signature.
+    /// A block is there, but it is not a minisign signature.
     Malformed(String),
-    /// Correctly signed, by a key we do not accept.
+    /// Correctly signed, by a key this build does not accept.
     Untrusted,
-    /// Signed by a key we *do* accept, for a different job. The interesting
-    /// one: it means someone took a genuine Romzeta binary and put it where a
-    /// launcher goes.
+    /// Signed by a key we do accept, for a different job — someone put a
+    /// genuine Romzeta binary where a launcher goes.
     WrongRole { expected: String, found: String },
 }
 
 impl std::fmt::Display for Refusal {
+    // `fmt` is fixed by the Display trait, so it keeps rustc's spelling.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Refusal::Unsigned => write!(f, "it carries no signature"),
@@ -130,29 +93,33 @@ impl std::fmt::Display for Refusal {
     }
 }
 
-/// Verifies `bytes` against `anchors` and requires it to declare `expected_role`.
+// ========== Attesting ==========
+
+/// Verifies the whole file `bytes` against `anchors`, and requires the result
+/// to declare `expected_role`. Returns what the signature says on success, or
+/// the reason it was refused.
 ///
-/// `bytes` must be the whole file. The signed region is everything before the
-/// signature block, which [`sigblock::split`] finds; passing a truncated read
-/// would fail rather than pass something unverified, but it would fail for the
-/// wrong reason.
+/// The three questions are answered in this order and the order is the point:
+/// is it signed by a key we trust, what does it say it is, and is that what we
+/// asked for. Nothing in the file means anything until the first one passes.
 pub fn attest(
     bytes: &[u8],
     anchors: &[Anchor<'_>],
     expected_role: &str,
 ) -> Result<Attested, Refusal> {
+    // The signed region is everything before the block sigblock finds.
     let (payload, signature) = sigblock::split(bytes);
     let Some(signature) = signature else {
         return Err(Refusal::Unsigned);
     };
+    // `?` propagates as a Refusal because of the `map_err` right before it.
     let signature = minisign_verify::Signature::decode(signature)
         .map_err(|e| Refusal::Malformed(e.to_string()))?;
 
     for anchor in anchors {
         let Ok(key) = minisign_verify::PublicKey::from_base64(anchor.base64) else {
-            // A build script put it there, so this is a broken build rather than
-            // anything about the file in front of us. Skip it and let the others
-            // speak.
+            // A build script put this here, so a bad anchor is a broken build
+            // rather than anything about the file. Let the other anchors speak.
             continue;
         };
         // `false` refuses minisign's pre-1.0 signature format. Everything we
@@ -162,9 +129,11 @@ pub fn attest(
             continue;
         }
 
-        // Only past the verify, never before it: until that call returns Ok the
-        // trusted comment is just bytes off a disk someone else wrote.
-        let (role, version) = split_comment(signature.trusted_comment());
+        // Only past the verify, never before: until that call returns Ok, the
+        // trusted comment is just bytes off a disk someone else wrote. minisign
+        // covers it with a second signature over `signature ‖ comment`, which
+        // the same `verify` call above already checked.
+        let (role, version) = splitComment(signature.trusted_comment());
         if role != expected_role {
             return Err(Refusal::WrongRole {
                 expected: expected_role.to_string(),
@@ -177,19 +146,20 @@ pub fn attest(
             version: version.to_string(),
         });
     }
+    // Fell off the end: a valid signature, but from nobody we know.
     Err(Refusal::Untrusted)
 }
 
-/// Splits a trusted comment into `(role, version)`.
+/// Splits a trusted comment into `(role, version)`. `xtask` writes
+/// `<role> <version> <date>`; the date is provenance for a human and nothing
+/// reads it.
 ///
-/// The comment `xtask` writes is `<role> <version> <date>`; the date is
-/// provenance for a human and nothing reads it. Missing fields come back empty
-/// rather than as an error — a signature that verified is ours regardless of
-/// what we wrote in the comment years ago, and the empty role simply will not
-/// match any `expected_role`, which is the correct outcome for a comment we
-/// cannot make sense of.
-fn split_comment(comment: &str) -> (&str, &str) {
+/// Missing fields come back empty rather than as an error — an empty role
+/// matches no `expected_role`, which is already the right outcome for a comment
+/// we cannot make sense of.
+fn splitComment(comment: &str) -> (&str, &str) {
     let mut parts = comment.split_whitespace();
+    // `unwrap_or("")` rather than `?`: see the doc comment above.
     (parts.next().unwrap_or(""), parts.next().unwrap_or(""))
 }
 

@@ -4,19 +4,15 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! The games screen — steps 3 to 4 of job 1, and all of job 3's editing.
-//!
-//! The cartridge's own name, then one list of what is already on it (edit mode
-//! only) and one of what is being added. Every added game shows the same three
-//! decisions: its name, which executable to start, and which cover to show.
-//!
-//! The executable row is the one that matters. Auto-detection preselects a
-//! *clear* winner and leaves the field empty otherwise, and Browse is offered
-//! either way — the guess is never presented as settled.
+//! Draws the games screen: the cartridge's name, the list of games already on
+//! it, and the draft rows being added — each with a name, an executable and a
+//! cover.
+
+// ########## THE GAMES SCREEN ##########
 
 use crate::app::{App, Mode};
 use crate::version;
-use crate::volume::human_bytes;
+use crate::volume::humanBytes;
 
 use super::{BAD, GOOD, WARN};
 
@@ -25,7 +21,7 @@ pub fn screen(app: &mut App, ctx: &egui::Context, ui: &mut egui::Ui) {
     ui.separator();
 
     if app.mode == Mode::Edit {
-        stale_launcher(app, ctx, ui);
+        staleLauncher(app, ctx, ui);
         existing(app, ui);
         ui.separator();
     }
@@ -36,7 +32,7 @@ pub fn screen(app: &mut App, ctx: &egui::Context, ui: &mut egui::Ui) {
                 .set_title("Pick the folder the game is installed in")
                 .pick_folder()
         {
-            app.add_game(ctx, folder);
+            app.addGame(ctx, folder);
         }
         ui.label(egui::RichText::new("The whole folder is copied onto the cartridge.").weak());
     });
@@ -67,7 +63,7 @@ pub fn screen(app: &mut App, ctx: &egui::Context, ui: &mut egui::Ui) {
 /// the filesystem won't take is reported by the footer, like every other thing
 /// standing between here and Review.
 fn name(app: &mut App, ui: &mut egui::Ui) {
-    let limit = app.volume().map(|v| v.max_label_len()).unwrap_or(32);
+    let limit = app.volume().map(|v| v.maxLabelLen()).unwrap_or(32);
     ui.horizontal(|ui| {
         ui.label("Cartridge name:");
         ui.add(egui::TextEdit::singleline(&mut app.name).desired_width(300.0));
@@ -83,17 +79,16 @@ fn name(app: &mut App, ui: &mut egui::Ui) {
     ui.add_space(8.0);
 }
 
-/// Shown when `App::poll_launcher_probe` found this cartridge's launcher.exe
-/// answering a version other than the one this installer carries. There is
-/// deliberately no way to reach Review over this alone — see `Plan::is_empty` —
-/// so this is the only path to refreshing a launcher on a cartridge whose games
-/// and name are otherwise fine.
-fn stale_launcher(app: &mut App, ctx: &egui::Context, ui: &mut egui::Ui) {
-    let Some(theirs) = app.stale_launcher else {
+/// Shown when the cartridge's `launcher.exe` states a version other than the
+/// one this installer carries. An empty plan cannot reach Review
+/// (`Plan::isEmpty`), so this is the only route to refreshing a launcher on a
+/// cartridge whose games and name are otherwise fine.
+fn staleLauncher(app: &mut App, ctx: &egui::Context, ui: &mut egui::Ui) {
+    let Some(theirs) = app.staleLauncher else {
         return;
     };
     let ours = version::bundled()
-        .expect("stale_launcher is only set when both the probe and the bundled version parsed");
+        .expect("staleLauncher is only set when both the probe and the bundled version parsed");
     egui::Frame::group(ui.style()).show(ui, |ui| {
         ui.colored_label(
             WARN,
@@ -102,7 +97,7 @@ fn stale_launcher(app: &mut App, ctx: &egui::Context, ui: &mut egui::Ui) {
             ),
         );
         if ui.button("Update launcher").clicked() {
-            app.update_launcher(ctx);
+            app.updateLauncher(ctx);
         }
     });
     ui.add_space(8.0);
@@ -192,8 +187,8 @@ fn draft(app: &mut App, index: usize, ui: &mut egui::Ui) -> bool {
         ui.horizontal(|ui| {
             ui.label("Starts:");
             let selected_text = draft
-                .exe_relative()
-                .map(|p| crate::catalog::to_relative_string(&p))
+                .exeRelative()
+                .map(|p| crate::catalog::toRelativeString(&p))
                 .unwrap_or_else(|| "— choose one —".into());
 
             egui::ComboBox::from_id_salt(("exe", index))
@@ -202,7 +197,7 @@ fn draft(app: &mut App, index: usize, ui: &mut egui::Ui) -> bool {
                 .show_ui(ui, |ui| {
                     for (n, candidate) in candidates.iter().enumerate() {
                         let label =
-                            format!("{} — {}", candidate.display(), human_bytes(candidate.bytes));
+                            format!("{} — {}", candidate.display(), humanBytes(candidate.bytes));
                         if ui
                             .selectable_label(draft.selected == Some(n), label)
                             .clicked()
@@ -222,7 +217,7 @@ fn draft(app: &mut App, index: usize, ui: &mut egui::Ui) -> bool {
                     .set_directory(&draft.source)
                     .add_filter("Programs", &["exe"])
                     .pick_file()
-                && let Err(e) = draft.set_manual_exe(&chosen)
+                && let Err(e) = draft.setManualExe(&chosen)
             {
                 error = Some(e);
             }
@@ -258,7 +253,7 @@ fn draft(app: &mut App, index: usize, ui: &mut egui::Ui) -> bool {
                     .add_filter("Images", &["png", "webp", "jpg", "jpeg", "gif", "avif"])
                     .pick_file()
             {
-                draft.set_image(chosen);
+                draft.setImage(chosen);
             }
             match &draft.image {
                 Some(path) => {
@@ -283,12 +278,9 @@ fn draft(app: &mut App, index: usize, ui: &mut egui::Ui) -> bool {
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             ui.label(
-                egui::RichText::new(format!(
-                    "{} in {file_count} files",
-                    human_bytes(total_bytes)
-                ))
-                .weak()
-                .small(),
+                egui::RichText::new(format!("{} in {file_count} files", humanBytes(total_bytes)))
+                    .weak()
+                    .small(),
             );
             match draft.blocker() {
                 Some(blocker) => ui.colored_label(WARN, blocker),

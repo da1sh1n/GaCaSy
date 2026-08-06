@@ -4,15 +4,13 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! Every test in this crate.
-//!
-//! Kept inside the crate rather than in `tests/` so that the tests can reach
-//! internals like [`MAGIC`] without those becoming public API. The signature
-//! block's whole job is to be a tight, auditable format definition; widening it
-//! for a test's convenience would be the wrong trade.
-//!
+//! Every test in this crate. Inside the crate so they can reach `MAGIC` and
+//! `FORMAT` without those becoming public API.
 //! Run with `cargo test -p sigblock`.
 
+// ########## SIGNATURE BLOCK TESTS ##########
+
+// `crate::*` because these tests use the private `MAGIC` and `FORMAT` too.
 use crate::*;
 
 const EXE: &[u8] = b"MZ\x90\x00 not really a PE, but neither is anything else here";
@@ -32,7 +30,7 @@ fn an_ordinary_binary_is_unsigned() {
     let (payload, signature) = split(EXE);
     assert_eq!(payload, EXE);
     assert_eq!(signature, None);
-    assert!(!is_signed(EXE));
+    assert!(!isSigned(EXE));
 }
 
 #[test]
@@ -56,9 +54,9 @@ fn re_signing_replaces_instead_of_nesting() {
 fn a_truncated_block_reads_as_unsigned() {
     let signed = attach(EXE, SIG);
     // Losing the footer is exactly what "truncate the last 16 bytes" does.
-    assert!(!is_signed(&signed[..signed.len() - FOOTER_LEN]));
+    assert!(!isSigned(&signed[..signed.len() - FOOTER_LEN]));
     // Losing one byte of it is subtler and must fail just as quietly.
-    assert!(!is_signed(&signed[..signed.len() - 1]));
+    assert!(!isSigned(&signed[..signed.len() - 1]));
 }
 
 #[test]
@@ -77,7 +75,7 @@ fn a_length_larger_than_the_file_is_refused() {
     let mut signed = attach(EXE, SIG);
     let at = signed.len() - FOOTER_LEN;
     signed[at..at + 4].copy_from_slice(&u32::MAX.to_le_bytes());
-    assert!(!is_signed(&signed));
+    assert!(!isSigned(&signed));
 }
 
 #[test]
@@ -85,7 +83,7 @@ fn a_future_format_is_left_alone() {
     let mut signed = attach(EXE, SIG);
     let at = signed.len() - FOOTER_LEN;
     signed[at + 4..at + 6].copy_from_slice(&2u16.to_le_bytes());
-    assert!(!is_signed(&signed));
+    assert!(!isSigned(&signed));
 }
 
 #[test]
@@ -93,7 +91,7 @@ fn a_non_utf8_signature_is_refused() {
     let mut signed = attach(EXE, SIG);
     let at = signed.len() - FOOTER_LEN - SIG.len();
     signed[at] = 0xff;
-    assert!(!is_signed(&signed));
+    assert!(!isSigned(&signed));
 }
 
 #[test]
@@ -101,7 +99,7 @@ fn the_magic_alone_is_not_a_block() {
     // Sixteen bytes of coincidence at the end of some unrelated file.
     let mut coincidence = EXE.to_vec();
     coincidence.extend_from_slice(MAGIC);
-    assert!(!is_signed(&coincidence));
+    assert!(!isSigned(&coincidence));
 }
 
 #[test]

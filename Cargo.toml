@@ -1,9 +1,10 @@
-# Romzeta workspace — the three programs of the cartridge system, plus the two
+# Romzeta workspace — the three programs of the cartridge system, plus the four
 # crates that serve them.
 #
 #   launcher/   runs on the cartridge and shows the games
 #   listener/   runs on the PC and notices a cartridge being connected
 #   installer/  the one file a user downloads; writes both of the above
+#   common/     log plumbing, UTF-16, and the x.y.z contract, shared by all three
 #   sigblock/   the signature every one of them carries inside itself
 #   trust/      whether a signature makes a binary safe to run, in one place
 #   xtask/      builds and signs a release; never shipped
@@ -14,7 +15,15 @@
 # installer/build.rs.
 [workspace]
 resolver = "3"
-members = ["installer", "launcher", "listener", "sigblock", "trust", "xtask"]
+members = [
+    "common",
+    "installer",
+    "launcher",
+    "listener",
+    "sigblock",
+    "trust",
+    "xtask",
+]
 
 # The version every program reports from `--version`, and the contract between
 # them: two Romzeta programs are compatible when this number matches. `y` and `z`
@@ -44,8 +53,8 @@ project_version = 0
 # xtask is out for a different reason: it is a build tool, not a product, and
 # nothing it depends on should ever end up linked into something we ship. It
 # still runs from anywhere in the workspace as `cargo run -p xtask -- …`.
-# sigblock and trust are in, because both shipped programs link them.
-default-members = ["launcher", "listener", "sigblock", "trust"]
+# common, sigblock and trust are in, because both shipped programs link them.
+default-members = ["common", "launcher", "listener", "sigblock", "trust"]
 
 # What ships. Cargo's stock `release` profile optimizes each crate on its own
 # and then links the pieces, which for a GUI binary leaves a lot of code nothing

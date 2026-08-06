@@ -132,7 +132,7 @@ What follows from having no elevated path at all:
 
 `%LOCALAPPDATA%\Romzeta\` — `listener.exe` and `listener.log`, together.
 
-It is the same path `settings::fallback_log_path` in
+It is the same path `settings::fallbackLogPath` in
 [`../listener/src/settings.rs`](../listener/src/settings.rs) already names as the log's home,
 so the install folder and the log folder are one folder rather than two that a paragraph had
 to reconcile. An installed listener never reaches that fallback at all: the primary path and
@@ -189,7 +189,7 @@ installer carries, so there is nothing for the user to choose or keep in step.
 A cartridge's name is the drive's **volume label**, and it is the only part of a cartridge that
 is not a file on it. There is nowhere else for it to live: `config.toml` is look and feel,
 `catalog.json` is the game list, and identity is a signature inside `launcher.exe`. So the
-label is the whole of it — read for the picker's summary line, written by `volume::set_label`.
+label is the whole of it — read for the picker's summary line, written by `volume::setLabel`.
 
 Two things follow from putting it in the plan rather than applying it on the keystroke:
 
@@ -409,7 +409,7 @@ launcher.
 ### Is this already a cartridge?
 
 The question that decides create-vs-edit, and the one place the installer makes a trust
-decision of its own: `volume::attested_launcher` reads `<root>/launcher.exe`, verifies it
+decision of its own: `volume::attestedLauncher` reads `<root>/launcher.exe`, verifies it
 against the anchors `build.rs` baked in, and requires the launcher role — the same call the
 listener makes, through the same [`../trust/`](../trust/) crate.
 

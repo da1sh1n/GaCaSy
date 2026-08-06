@@ -101,6 +101,8 @@ Romzeta/
       catalog.rs / image.rs / version.rs / work.rs
     structure.md     Reference for the setup side
     TODO.md          What's left — chiefly a run on real media
+  common/            Log plumbing, UTC dates, UTF-16 and the x.y.z contract,
+                     shared by all three programs and the build tool
   Cargo.toml         Workspace tying the three crates together
   README.md          This file
   LICENSE            GNU GPL v3.0-or-later

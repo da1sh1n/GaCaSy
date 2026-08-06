@@ -4,26 +4,15 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! The Windows trigger: resident, event-driven, 0% CPU while idle.
+//! The Windows trigger: a hidden top-level window and a message loop blocked in
+//! `GetMessage`, waiting for `WM_DEVICECHANGE`. Also owns the tray icon, its
+//! menu, the single-instance mutex, and the startup sweep of mounted drives.
 //!
-//! A hidden window and a message loop, and that is the whole program. It costs
-//! a couple of megabytes of working set and nothing else, because the process
-//! spends its entire life blocked in `GetMessage` — a real kernel wait, not a
-//! sleep in a loop. **There is no polling fallback and there must never be
-//! one**: that idle cost is the entire justification for staying resident
-//! rather than being started per event (see `../../structure.md`,
-//! "Why not one-shot on Windows too").
-//!
-//! Three details are worth knowing before touching this file:
-//!
-//! * The window is **top-level, not message-only**. Broadcast
-//!   `WM_DEVICECHANGE` volume notifications are delivered to top-level windows
-//!   only. An `HWND_MESSAGE` window compiles, runs, and silently receives
-//!   nothing forever — the most expensive way to get this wrong.
-//! * `dbcv_unitmask` is a **bitmask** of drive letters, not one letter. A
-//!   multi-partition device arrives as a single event carrying several.
-//! * A cartridge plugged in *before* login never produces an arrival event at
-//!   all, hence the startup sweep.
+//! The window is top-level, not `HWND_MESSAGE`: broadcast device notifications
+//! reach nothing else. `dbcv_unitmask` is a bitmask, so one event can carry
+//! several drive letters.
+
+// ########## THE WINDOWS TRIGGER ##########
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -52,24 +41,32 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     WM_DEVICECHANGE, WM_RBUTTONUP, WNDCLASSW, WS_OVERLAPPED,
 };
 
+use common::utf16::wide;
+
 use crate::log::Log;
 use crate::{settings, volume};
 
-/// Its own name, distinct from the launcher's `Local\Romzeta.CartridgeLauncher`.
-/// `Local\` scopes it to the login session, which is the right scope for
-/// something started per user by a `Run` entry.
+/// The listener's mutex name, distinct from the launcher's
+/// `Local\Romzeta.CartridgeLauncher`. `Local\` scopes it to the login session,
+/// matching a `Run` entry's per-user lifetime.
 const INSTANCE_MUTEX: &str = r"Local\Romzeta.CartridgeListener";
 
 const WINDOW_CLASS: &str = "Romzeta.ListenerWindow";
 
 /// `uID` `Shell_NotifyIconW` identifies this icon by, alongside `hWnd`. One
 /// tray icon per process, so any constant does — it only has to be stable
-/// between the `NIM_ADD` in `add_tray_icon` and the `NIM_DELETE` on shutdown.
+/// between the `NIM_ADD` in `addTrayIcon` and the `NIM_DELETE` on shutdown.
 const TRAY_ICON_UID: u32 = 1;
 
 /// The icon resource `build.rs` compiles in via `winres`, which assigns id
 /// `1` to the first (and only) `set_icon` call.
-const TRAY_ICON_RESOURCE: *const u16 = 1 as *const u16;
+///
+/// This is Win32's `MAKEINTRESOURCE`: an integer id passed where an `LPCWSTR`
+/// is expected, which the loader tells apart from a real string by its value
+/// being below 65536. `without_provenance` is the honest spelling of "this
+/// address is a token, not memory" — it must stay exactly 1, so `ptr::dangling`
+/// is not a substitute (that yields `align_of::<u16>()`, which is 2).
+const TRAY_ICON_RESOURCE: *const u16 = std::ptr::without_provenance(1);
 
 /// Custom message `Shell_NotifyIconW` delivers mouse activity on the tray
 /// icon through. `WM_APP` is the documented start of the range an
@@ -82,7 +79,7 @@ const ID_MENU_EXIT: u32 = 2;
 /// Everything the window procedure needs.
 ///
 /// Held in a thread-local rather than threaded through `GWLP_USERDATA`: the
-/// window, the message loop and every `wnd_proc` call all live on the one
+/// window, the message loop and every `wndProc` call all live on the one
 /// thread `run` is called from, so a thread-local is the same guarantee with
 /// none of the pointer casting.
 struct State {
@@ -120,10 +117,11 @@ thread_local! {
     static STATE: RefCell<Option<State>> = const { RefCell::new(None) };
 }
 
-/// Runs until logout. Returns early (without launching anything) if another
+/// Takes ownership of `log` and runs until logout: sweeps the drives already
+/// mounted, then pumps messages. Returns early, launching nothing, if another
 /// instance already holds the mutex.
 pub fn run(log: Log) {
-    let Some(_instance) = acquire_single_instance() else {
+    let Some(_instance) = acquireSingleInstance() else {
         // The `Run` entry can fire twice across a fast logoff/logon, and two
         // listeners racing on one arrival means two launchers on screen.
         log.line("another listener is already running; exiting");
@@ -144,8 +142,8 @@ pub fn run(log: Log) {
         })
     });
 
-    let Some(hwnd) = create_hidden_window() else {
-        with_state(|state| {
+    let Some(hwnd) = createHiddenWindow() else {
+        withState(|state| {
             state
                 .log
                 .line("FAILED to create the listener window; exiting")
@@ -156,8 +154,8 @@ pub fn run(log: Log) {
     // A tray icon is a courtesy, not a requirement — a cartridge still gets
     // noticed and launched without one — so failing to add it is logged and
     // otherwise ignored rather than treated as a reason to exit.
-    if !add_tray_icon(hwnd) {
-        with_state(|state| {
+    if !addTrayIcon(hwnd) {
+        withState(|state| {
             state
                 .log
                 .line("failed to add the tray icon; continuing without one")
@@ -167,18 +165,23 @@ pub fn run(log: Log) {
     // After the window exists, so an arrival that happens mid-sweep is queued
     // rather than missed. The debounce then keeps the queued event from
     // re-launching what the sweep already picked up.
-    startup_sweep();
+    startupSweep();
 
-    message_loop();
+    messageLoop();
     let _ = hwnd;
-    with_state(|state| state.log.line("listener stopped"));
+    withState(|state| state.log.line("listener stopped"));
 }
 
-fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> Option<R> {
+/// Runs `f` against the thread-local state, handing back whatever it returns.
+/// `None` when `run` has not populated the state yet, which is the case for
+/// every callback that could somehow fire before startup finished.
+fn withState<R>(f: impl FnOnce(&mut State) -> R) -> Option<R> {
+    // `borrow_mut` panics on a nested call, so nothing inside `f` may reach
+    // back into `withState` — every caller here is a leaf.
     STATE.with(|state| state.borrow_mut().as_mut().map(f))
 }
 
-// ── Single instance ──────────────────────────────────────────────────────
+// ========== Single Instance ==========
 
 /// Holds the process-wide mutex; dropping it (or exiting) frees the name.
 struct InstanceGuard(HANDLE);
@@ -193,15 +196,19 @@ impl Drop for InstanceGuard {
 
 /// `Some` if this is the first instance, `None` if one is already running.
 /// Same named-mutex pattern as `../../../launcher/src/main.rs`.
-fn acquire_single_instance() -> Option<InstanceGuard> {
+fn acquireSingleInstance() -> Option<InstanceGuard> {
     let name = wide(INSTANCE_MUTEX);
     unsafe {
+        // A named mutex, not a lock file: the kernel frees the name when the
+        // process dies, however it dies, so a crash cannot leave a stale claim.
         let handle = CreateMutexW(ptr::null(), 0, name.as_ptr());
         if handle.is_null() {
             // Couldn't create the mutex at all — don't let the guard become a
             // reason the listener refuses to run.
             return Some(InstanceGuard(handle));
         }
+        // CreateMutexW succeeds either way; the error code is the only thing
+        // that distinguishes "created it" from "opened someone else's".
         if GetLastError() == ERROR_ALREADY_EXISTS {
             CloseHandle(handle);
             return None;
@@ -210,7 +217,7 @@ fn acquire_single_instance() -> Option<InstanceGuard> {
     }
 }
 
-// ── Window and message loop ──────────────────────────────────────────────
+// ========== Window And Message Loop ==========
 
 /// Registers the class and creates the (never shown) top-level window.
 ///
@@ -218,13 +225,15 @@ fn acquire_single_instance() -> Option<InstanceGuard> {
 /// button — but it *is* a real top-level window, which is what makes broadcast
 /// `WM_DEVICECHANGE` reach it. Using `HWND_MESSAGE` here would be the classic
 /// silent failure; see this module's header.
-fn create_hidden_window() -> Option<HWND> {
+fn createHiddenWindow() -> Option<HWND> {
     unsafe {
         let instance = GetModuleHandleW(ptr::null());
         let class_name = wide(WINDOW_CLASS);
 
+        // `zeroed` then set what matters: WNDCLASSW has a dozen fields Windows
+        // reads as "default" when they are null, and naming them all is noise.
         let mut class: WNDCLASSW = std::mem::zeroed();
-        class.lpfnWndProc = Some(wnd_proc);
+        class.lpfnWndProc = Some(wndProc);
         class.hInstance = instance;
         class.lpszClassName = class_name.as_ptr();
         if RegisterClassW(&class) == 0 {
@@ -252,7 +261,7 @@ fn create_hidden_window() -> Option<HWND> {
 
 /// Blocks in `GetMessage` until the window is destroyed or the session ends.
 /// This call, and not a timer, is why the idle CPU cost is zero.
-fn message_loop() {
+fn messageLoop() {
     let mut message: MSG = unsafe { std::mem::zeroed() };
     loop {
         // 0 = WM_QUIT, -1 = error. Either way there is nothing left to pump.
@@ -267,7 +276,15 @@ fn message_loop() {
     }
 }
 
-unsafe extern "system" fn wnd_proc(
+/// The window procedure Windows calls for every message this window receives.
+/// Handles device arrivals, tray clicks and destruction, and hands everything
+/// else to the default handler. The return value's meaning is per-message.
+///
+/// # Safety
+///
+/// Called only by Windows, with the arguments it documents for each message.
+/// `extern "system"` because Windows calls it, not Rust.
+unsafe extern "system" fn wndProc(
     hwnd: HWND,
     message: u32,
     wparam: WPARAM,
@@ -275,7 +292,7 @@ unsafe extern "system" fn wnd_proc(
 ) -> LRESULT {
     match message {
         WM_DEVICECHANGE if wparam as u32 == DBT_DEVICEARRIVAL => {
-            unsafe { on_device_arrival(lparam) };
+            unsafe { onDeviceArrival(lparam) };
             // TRUE: the message was handled. Device-change broadcasts are
             // documented to be answered this way.
             1
@@ -285,12 +302,12 @@ unsafe extern "system" fn wnd_proc(
             // the old way: `lparam` is the mouse message itself, the same
             // value a click on a real window would have arrived as.
             if matches!(lparam as u32, WM_RBUTTONUP | WM_CONTEXTMENU) {
-                unsafe { show_tray_menu(hwnd) };
+                unsafe { showTrayMenu(hwnd) };
             }
             0
         }
         WM_DESTROY => {
-            remove_tray_icon(hwnd);
+            removeTrayIcon(hwnd);
             unsafe { PostQuitMessage(0) };
             0
         }
@@ -298,11 +315,11 @@ unsafe extern "system" fn wnd_proc(
     }
 }
 
-// ── Tray icon ─────────────────────────────────────────────────────────────
+// ========== Tray Icon ==========
 
 /// Adds the tray icon. `false` if the shell refused it, which is not fatal —
 /// see the call site in `run`.
-fn add_tray_icon(hwnd: HWND) -> bool {
+fn addTrayIcon(hwnd: HWND) -> bool {
     unsafe {
         let instance = GetModuleHandleW(ptr::null());
         let icon = LoadIconW(instance, TRAY_ICON_RESOURCE);
@@ -314,7 +331,7 @@ fn add_tray_icon(hwnd: HWND) -> bool {
         data.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
         data.uCallbackMessage = WM_TRAYICON;
         data.hIcon = icon;
-        set_tip(&mut data.szTip, "Romzeta Listener");
+        setTip(&mut data.szTip, "Romzeta Listener");
 
         Shell_NotifyIconW(NIM_ADD, &data) != 0
     }
@@ -322,7 +339,7 @@ fn add_tray_icon(hwnd: HWND) -> bool {
 
 /// Removes the tray icon on the way out, so it doesn't linger as a stale
 /// entry in the hidden-icons flyout after the process has already exited.
-fn remove_tray_icon(hwnd: HWND) {
+fn removeTrayIcon(hwnd: HWND) {
     unsafe {
         let mut data: NOTIFYICONDATAW = std::mem::zeroed();
         data.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
@@ -334,7 +351,7 @@ fn remove_tray_icon(hwnd: HWND) {
 
 /// Copies `text` (truncated to fit) into a `NOTIFYICONDATAW` fixed-size
 /// UTF-16 field, NUL-terminated.
-fn set_tip(field: &mut [u16], text: &str) {
+fn setTip(field: &mut [u16], text: &str) {
     let wide = wide(text);
     let n = wide.len().min(field.len());
     let truncated = n == field.len();
@@ -348,7 +365,7 @@ fn set_tip(field: &mut [u16], text: &str) {
 
 /// Builds and shows the right-click menu at the cursor, then acts on
 /// whichever item (if any) was picked.
-unsafe fn show_tray_menu(hwnd: HWND) {
+unsafe fn showTrayMenu(hwnd: HWND) {
     unsafe {
         let menu = CreatePopupMenu();
         if menu.is_null() {
@@ -385,7 +402,7 @@ unsafe fn show_tray_menu(hwnd: HWND) {
         DestroyMenu(menu);
 
         match cmd as u32 {
-            ID_MENU_OPEN_LOG => open_log_file(),
+            ID_MENU_OPEN_LOG => openLogFile(),
             ID_MENU_EXIT => {
                 DestroyWindow(hwnd);
             }
@@ -397,8 +414,8 @@ unsafe fn show_tray_menu(hwnd: HWND) {
 /// Opens the log with whatever the user has associated with `.log` files —
 /// same as double-clicking it in Explorer. The listener has no window of its
 /// own to display the log in, and doesn't need one just for this.
-fn open_log_file() {
-    with_state(|state| {
+fn openLogFile() {
+    withState(|state| {
         let Some(path) = state.log.path() else {
             return;
         };
@@ -411,7 +428,7 @@ fn open_log_file() {
                 file.as_ptr(),
                 ptr::null(),
                 ptr::null(),
-                SW_SHOWNORMAL as i32,
+                SW_SHOWNORMAL,
             );
         }
     });
@@ -425,7 +442,7 @@ fn open_log_file() {
 /// `lparam` must be the pointer Windows passed with the message: either null,
 /// or a valid `DEV_BROADCAST_HDR` whose `dbch_devicetype` says what the rest of
 /// the allocation actually is.
-unsafe fn on_device_arrival(lparam: LPARAM) {
+unsafe fn onDeviceArrival(lparam: LPARAM) {
     if lparam == 0 {
         return;
     }
@@ -444,22 +461,22 @@ unsafe fn on_device_arrival(lparam: LPARAM) {
     // a cartridge, and probing one can block on an unreachable server, so it
     // is dropped before any file access.
     if flags & DBTF_NET != 0 {
-        with_state(|state| state.log.line("ignored a network drive arrival"));
+        withState(|state| state.log.line("ignored a network drive arrival"));
         return;
     }
 
     // The bitmask, not a single letter: one event can carry several.
-    for letter in letters_from_mask(unitmask) {
-        handle_letter(letter, "arrival");
+    for letter in lettersFromMask(unitmask) {
+        handleLetter(letter, "arrival");
     }
 }
 
-/// Runs the shared core over one drive letter, subject to the drive-type
-/// filter and the debounce.
-fn handle_letter(letter: char, reason: &str) {
-    with_state(|state| {
-        let drive_type = drive_type(letter);
-        if !is_candidate_drive(drive_type) {
+/// Runs the shared core over one drive letter, subject to the drive-type filter
+/// and the debounce. `reason` names what brought us here, for the log line.
+fn handleLetter(letter: char, reason: &str) {
+    withState(|state| {
+        let drive_type = driveType(letter);
+        if !isCandidateDrive(drive_type) {
             state.log.line(&format!(
                 "{letter}: ignored on {reason}: drive type {drive_type} is not local storage"
             ));
@@ -471,12 +488,12 @@ fn handle_letter(letter: char, reason: &str) {
             ));
             return;
         }
-        let root = drive_root(letter);
-        volume::handle_volume(&root, &state.log);
+        let root = driveRoot(letter);
+        volume::handleVolume(&root, &state.log);
     });
 }
 
-// ── Volume enumeration ───────────────────────────────────────────────────
+// ========== Volume Enumeration ==========
 
 /// Runs the core over every drive already mounted.
 ///
@@ -484,30 +501,36 @@ fn handle_letter(letter: char, reason: &str) {
 /// *after* logging in — a cartridge that was already connected at boot
 /// produces no arrival event, and the failure reads as flakiness rather than
 /// as a missing feature.
-fn startup_sweep() {
-    for letter in mounted_drive_letters() {
-        handle_letter(letter, "startup sweep");
+fn startupSweep() {
+    for letter in mountedDriveLetters() {
+        handleLetter(letter, "startup sweep");
     }
 }
 
 /// Every drive letter currently mounted, A–Z.
-fn mounted_drive_letters() -> Vec<char> {
-    letters_from_mask(unsafe { GetLogicalDrives() })
+fn mountedDriveLetters() -> Vec<char> {
+    // Same bitmask shape as an arrival event, so one expander serves both.
+    lettersFromMask(unsafe { GetLogicalDrives() })
 }
 
-/// Expands a 26-bit drive-letter bitmask (bit 0 = `A`) into letters.
-fn letters_from_mask(mask: u32) -> Vec<char> {
+/// Expands a 26-bit drive-letter bitmask (bit 0 = `A`) into the letters it sets.
+fn lettersFromMask(mask: u32) -> Vec<char> {
     (0..26)
         .filter(|bit| mask & (1 << bit) != 0)
+        // Arithmetic on the ASCII byte, then back to a char — every drive
+        // letter is A–Z, so there is no multi-byte case to worry about.
         .map(|bit| (b'A' + bit as u8) as char)
         .collect()
 }
 
-fn drive_root(letter: char) -> PathBuf {
+/// A drive letter as a root path, e.g. `E:\`.
+fn driveRoot(letter: char) -> PathBuf {
     PathBuf::from(format!("{letter}:\\"))
 }
 
-fn drive_type(letter: char) -> u32 {
+/// What kind of drive is mounted at `letter` — one of the Win32 `DRIVE_*`
+/// values. `DRIVE_NO_ROOT_DIR` for a letter nothing is mounted at.
+fn driveType(letter: char) -> u32 {
     let root = wide(&format!("{letter}:\\"));
     unsafe { GetDriveTypeW(root.as_ptr()) }
 }
@@ -519,11 +542,6 @@ fn drive_type(letter: char) -> u32 {
 /// shares, optical drives and RAM disks are excluded here rather than left to
 /// the missing `.cartridge` to reject, because reaching for a file on a stale
 /// network mount can block for a long time and this runs on the message thread.
-fn is_candidate_drive(drive_type: u32) -> bool {
+fn isCandidateDrive(drive_type: u32) -> bool {
     matches!(drive_type, DRIVE_FIXED | DRIVE_REMOVABLE)
-}
-
-/// A NUL-terminated UTF-16 buffer for the Win32 `…W` entry points.
-fn wide(text: &str) -> Vec<u16> {
-    text.encode_utf16().chain(std::iter::once(0)).collect()
 }

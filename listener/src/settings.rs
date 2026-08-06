@@ -4,52 +4,33 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! The listener's fixed settings, and where its log goes.
-//!
-//! # There is no config file
-//!
-//! There used to be a `config.toml` beside the exe. It held two things: the list
-//! of cartridge keys this PC trusted, and these tunables.
-//!
-//! The key list is gone because trust is now cryptographic and compiled in — a
-//! list of trusted keys in a writable file beside the exe would have let
-//! anything able to edit that file grant itself auto-run on every USB insert,
-//! which is precisely the capability the signature exists to deny (see
-//! `../build.rs`). And once that was gone, what remained was a debounce window
-//! and a log path, neither of which anyone has ever needed to change. A file
-//! that exists to be found, read, and left alone is a file worth deleting.
-//!
-//! So there is no config file and no flag for these. Changing one means a
-//! rebuild, which is the right bar for a value nobody should have to touch —
-//! and it took the crate's last non-Windows dependency with it, since `toml`
-//! was here and in the retired marker parser and nowhere else.
+//! The crate's fixed constants — the arrival debounce window and the log file
+//! name — and the two functions that build the log's path.
+
+// ########## FIXED SETTINGS ##########
 
 use std::env;
 use std::path::{Path, PathBuf};
 
-/// How long to ignore repeat arrivals for a drive letter already handled.
-///
-/// A flaky USB link can fire several add events for one physical connection;
-/// without this, each one launches another copy of the launcher. Long enough to
-/// swallow that, short enough that deliberately re-plugging a cartridge still
-/// works.
+/// How long to ignore repeat arrivals for a drive letter already handled. A
+/// flaky USB link fires several add events for one physical connection.
 pub const DEBOUNCE_SECONDS: u64 = 5;
 
 pub const LOG_FILE: &str = "listener.log";
 
-/// Where the log belongs: beside the exe, so the listener's two files are in one
+/// The log beside the exe in `dir`, so the listener's two files sit in one
 /// folder you can open.
-///
-/// One deployment can't honour that — an exe dropped somewhere read-only — so
-/// [`crate::log`] falls back to [`fallback_log_path`] when this can't be
-/// opened. That is a fallback and not the default.
-pub fn default_log_path(dir: &Path) -> PathBuf {
+pub fn defaultLogPath(dir: &Path) -> PathBuf {
     dir.join(LOG_FILE)
 }
 
-/// Where the log goes when the folder beside the exe is read-only.
+/// Where the log goes when the folder beside the exe turns out to be read-only.
+/// A fallback, not the default — `crate::log` only reaches for it after the
+/// preferred path has failed to open.
 #[cfg(windows)]
-pub fn fallback_log_path() -> PathBuf {
+pub fn fallbackLogPath() -> PathBuf {
+    // `var_os`, not `var`: a profile path that is not valid UTF-16 is still a
+    // perfectly good path to hand back to the filesystem.
     let base = env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(env::temp_dir);
@@ -57,7 +38,8 @@ pub fn fallback_log_path() -> PathBuf {
 }
 
 #[cfg(not(windows))]
-pub fn fallback_log_path() -> PathBuf {
+pub fn fallbackLogPath() -> PathBuf {
+    // The XDG spec's state directory, with its documented default under `HOME`.
     let base = env::var_os("XDG_STATE_HOME")
         .map(PathBuf::from)
         .or_else(|| env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))

@@ -22,13 +22,9 @@ const HALF_PI = 0.5 * PI;
 const rand = (n) => n * random();
 const lerp = (from, to, t) => (1 - t) * from + t * to;
 
-// Where a particle is, not how old it is.
-//
-// Coalesce fades on lifespan, which suits a field converging on the middle. Ours
-// is born in the middle — behind the covers — and the middle is the one place
-// nothing should be visible, so age is the wrong axis entirely. A hexagon
-// instead comes up out of nothing at the centre, is solid by the time it clears
-// the covers, and stays solid all the way out.
+// Opacity follows where a particle is, not how old it is: it is born behind the
+// covers, which is the one place nothing should be visible, so it comes up out
+// of nothing at the centre and is solid by the time it clears them.
 //
 // Measured in half-windows, so 1 is the edge whichever way it went.
 const FADE_BY = 0.2;
@@ -103,11 +99,6 @@ const SPAWN_SPREAD = 0.3;
 // Kept from Coalesce. Without it the field is a starburst rather than a spiral.
 const SWIRL = 0.75 * HALF_PI;
 const STEER = 0.05;
-// No trail. Coalesce fades the canvas instead of clearing it, which works for a
-// filled particle because what is left behind is a smear. A hexagon is an
-// OUTLINE: what a fade leaves behind is last frame's outline, offset by however
-// far the thing moved, and a few of those at once read as ghosts rather than as
-// motion. Cleared outright, every frame, so there is exactly one of each.
 // How far past the window a particle runs before it is recycled rather than
 // drawn where nobody can see it.
 const EDGE_SLACK = 40;
@@ -272,16 +263,10 @@ function initParticle(i, spread) {
   ], i);
 }
 
-// The window opens with the field already across it, rather than with everything
-// stacked in the middle working its way out. Seeded the way it recycles, the
-// shelf spends its first several seconds visibly filling up — which is time the
-// launcher does not have, since the whole point of it is to be looked at the
-// moment a drive is plugged in. Scattered, it opens mid-flow.
-//
-// Ages are scattered with them, so they do not all reach the edge together and
-// leave the window empty at once.
-//
-// Fog has no state to seed — every one of its frames is computed from the clock.
+// Scattered across the window rather than stacked in the middle, so it opens
+// mid-flow instead of spending its first seconds visibly filling up. Ages are
+// scattered too, or they would all reach the edge together and leave the window
+// empty at once. Fog has no state to seed — its frames come from the clock.
 function seedField() {
   if (BACKDROP_EFFECT === "fog") return;
   for (let i = 0; i < props.length; i += PARTICLE_PROPS) initParticle(i, true);
@@ -337,6 +322,9 @@ function drawParticles() {
   field_time += 1;
   if (field_time % FIELD_EVERY !== 0) return;
 
+  // Repainted solid every frame rather than faded, so there is no trail. A
+  // hexagon is an outline, and what a fade leaves behind is last frame's
+  // outline offset by however far the thing moved — ghosts, not motion.
   ctx.globalCompositeOperation = "source-over";
   ctx.globalAlpha = 1;
   ctx.fillStyle = solid_fill;

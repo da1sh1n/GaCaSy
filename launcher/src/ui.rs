@@ -4,34 +4,17 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! The window, the webview in it, and everything the two say to each other.
-//!
-//! This is the only place the halves of the launcher meet: config and catalog
-//! go *out* to the page as globals before its own scripts run, clicks come
-//! *back* over IPC, and a launch started here reports its outcome through the
-//! event loop and into `window.__launchOutcome`.
-//!
-//! Nothing here blocks. Waiting on a game is [`crate::launch`]'s job, on a
-//! worker thread, because the UI thread has an animation to keep painting.
-//!
-//! # The IPC surface
-//!
-//! Four messages, and deliberately no general "set this setting" one — the page
-//! can start a game, close the window, and change the two things about the row
-//! that are its own business:
+//! Builds the window and the webview in it, injects config and catalog as page
+//! globals, handles the four IPC messages, and runs the event loop.
 //!
 //! ```text
-//! close             the close button, and the page's own outro when a game is up
+//! close             the close button, and the page's outro when a game is up
 //! launch:<id>       a cover was chosen
 //! mode:<name>       the order control changed; one of `order::MODES`
 //! order:<a,b,c>     covers were dragged into a new order in arrange mode
 //! ```
-//!
-//! The last two are the only route by which the page writes to the disk, and
-//! both are checked here rather than trusted: an unknown mode and an id list
-//! that isn't a permutation are both rejected/repaired before anything is
-//! stored, so a bug in the page can't leave a config a later run has to make
-//! sense of.
+
+// ########## WINDOW, WEBVIEW AND IPC ##########
 
 use std::path::Path;
 use std::thread;
@@ -65,12 +48,12 @@ enum UserEvent {
 pub fn run(base_dir: &Path) -> wry::Result<()> {
     let config = config::load(base_dir);
     let games = catalog::load(base_dir);
-    let init_script = init_script(base_dir, &config, &games);
+    let initScript = initScript(base_dir, &config, &games);
 
     // WebView2's user-data folder is the engine's only on-disk footprint. We
     // point it at output/assets/, so the engine drops its (fixed-name)
     // EBWebView cache folder in there beside the cover art rather than in the
-    // cartridge root. content::ensure_layout pre-creates it so it's present
+    // cartridge root. content::ensureLayout pre-creates it so it's present
     // from the first launch.
     //
     // Worth knowing before reaching for `rm -rf`: EBWebView is regenerable
@@ -103,7 +86,7 @@ pub fn run(base_dir: &Path) -> wry::Result<()> {
 
     // Before it is shown at its final place, so the shape is never seen
     // changing. Undecorated windows are bare rectangles otherwise.
-    window::round_corners(&window, config.window_corner_radius);
+    window::roundCorners(&window, config.window_corner_radius);
     window::center(&window);
     // Only now, once it is the size and in the place it will stay: raising a
     // window that is still being moved shows the move.
@@ -125,10 +108,10 @@ pub fn run(base_dir: &Path) -> wry::Result<()> {
 
     let webview = WebViewBuilder::new_with_web_context(&mut web_context)
         .with_custom_protocol("app".into(), move |_webview_id, request| {
-            assets::handle_request(&base_for_protocol, request)
+            assets::handleRequest(&base_for_protocol, request)
         })
         .with_url("app://localhost")
-        .with_initialization_script(init_script)
+        .with_initialization_script(initScript)
         .with_additional_browser_args(
             "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection \
              --disable-gpu --disable-extensions --disable-background-networking \
@@ -136,7 +119,7 @@ pub fn run(base_dir: &Path) -> wry::Result<()> {
              --disable-component-update --disable-default-apps --disable-sync \
              --no-default-browser-check --renderer-process-limit=1",
         )
-        .with_background_color(background_rgba(&config.primary_color))
+        .with_background_color(backgroundRgba(&config.primary_color))
         .with_ipc_handler(move |request| {
             let body = request.body().as_str();
             if body == "close" {
@@ -149,7 +132,7 @@ pub fn run(base_dir: &Path) -> wry::Result<()> {
             // page's side, and writing it down would turn one bad message into a
             // config that reads wrong forever.
             if let Some(mode) = body.strip_prefix("mode:") {
-                if order::is_mode(mode) {
+                if order::isMode(mode) {
                     config::store(&base_for_settings, "order_mode", mode.into());
                 }
                 return;
@@ -261,16 +244,18 @@ pub fn run(base_dir: &Path) -> wry::Result<()> {
         // armed the loop has to wake up at it, and the wake-up itself is what
         // acts on it. (`webview` and `window` are both kept alive here for the
         // window's lifetime; `window` is also what the topmost drop needs.)
-        if let Some(deadline) = exit_deadline {
-            if Instant::now() >= deadline {
-                exiting = true;
-            }
+        // Let-chains: bind the deadline and test it in one condition, so an
+        // unarmed `None` and a deadline not yet reached take the same path.
+        if let Some(deadline) = exit_deadline
+            && Instant::now() >= deadline
+        {
+            exiting = true;
         }
-        if let Some(deadline) = topmost_until {
-            if Instant::now() >= deadline {
-                window::drop_topmost(&window);
-                topmost_until = None;
-            }
+        if let Some(deadline) = topmost_until
+            && Instant::now() >= deadline
+        {
+            window::dropTopmost(&window);
+            topmost_until = None;
         }
         *control_flow = if exiting {
             ControlFlow::Exit
@@ -286,20 +271,14 @@ pub fn run(base_dir: &Path) -> wry::Result<()> {
     });
 }
 
-/// The window's own fill, taken from `background_color` so the frame the page
-/// has not painted yet is already the right colour.
+/// The window's own fill, parsed out of `color`, so the frame the page has not
+/// painted yet is already the right shade — `style.css` is a separate `app://`
+/// request, so there is a frame in between where a wrong fill reads as a flash.
 ///
-/// This used to be a hard-coded black, which was invisible while the whole
-/// stylesheet was inline in `index.html` — the page's first paint carried the
-/// configured background. Now that `style.css` is a separate `app://` request,
-/// there is a frame in between, and on a cartridge with a light background a
-/// black one reads as a flash.
-///
-/// Only `#rgb` and `#rrggbb` are understood. `config.toml` legitimately allows
-/// any CSS colour string (`rgba(...)`, a named colour), and anything this can't
-/// read falls back to black — one unstyled frame is the old behaviour, not a
-/// new failure, and guessing at a colour we can't parse would be worse.
-fn background_rgba(color: &str) -> wry::RGBA {
+/// Only `#rgb` and `#rrggbb` are understood. Anything else — `rgba(...)`, a
+/// named colour — falls back to black, which is one unstyled frame rather than
+/// a guess at a colour we cannot read.
+fn backgroundRgba(color: &str) -> wry::RGBA {
     let hex = color.trim().strip_prefix('#').unwrap_or("");
     let digits: Vec<u8> = match hex.len() {
         // #rgb is shorthand for #rrggbb — each digit doubled, not zero-padded.
@@ -325,7 +304,7 @@ fn background_rgba(color: &str) -> wry::RGBA {
 /// Handed over this way rather than fetched: `fetch()`ing catalog.json from the
 /// page would hit CORS restrictions. serde_json handles escaping, so a color or
 /// a game name can hold anything without breaking out of the script.
-fn init_script(base_dir: &Path, config: &Config, games: &[catalog::Game]) -> String {
+fn initScript(base_dir: &Path, config: &Config, games: &[catalog::Game]) -> String {
     let ui_settings = serde_json::json!({
         "borderGap": config.border_gap,
         "imageGap": config.image_gap,

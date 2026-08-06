@@ -4,13 +4,10 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! Keeping a second launcher from opening on top of the first.
-//!
-//! A named mutex rather than a socket, so nothing ever binds a port: the OS
-//! releases the name when the process dies, which also means a crashed
-//! launcher leaves nothing behind to clean up.
-//!
-//! Only the deployed exe takes the lock — see `main`.
+//! Takes a named mutex so a second launcher cannot open on top of the first,
+//! and releases it when the guard drops.
+
+// ########## SINGLE INSTANCE ##########
 
 /// Holds the process-wide single-instance mutex; releasing it (on drop or
 /// process exit) frees the name for the next launch.

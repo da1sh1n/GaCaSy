@@ -4,28 +4,10 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! The window, the GL context and the event loop — everything under the wizard.
-//!
-//! This used to be four lines calling `eframe::run_native`. It is a file now for
-//! one reason: `eframe` asks for `egui-winit`'s `clipboard` and `links` features
-//! in its own manifest, and cargo features are additive, so no dependent can turn
-//! them off. Those two features cost this installer:
-//!
-//! * `arboard`, requested with `image-data`, which pulls in `image` and `png` so
-//!   that a *picture* can be pasted — into a program whose only text field holds
-//!   a game's name. See [`crate::clipboard`] for the two Win32 calls that replace
-//!   it.
-//! * `webbrowser`, which pulls in `url`, which pulls in `idna`, which pulls in
-//!   the seven `icu_*` crates and their Unicode tables — to open links. This
-//!   program contains no links.
-//!
-//! `egui_glow` offers the same integration with those two behind flags of its
-//! own, left off here, so what remains is the window and the event loop that
-//! `eframe` would have run. The shape below is the one from `egui_glow`'s
-//! `pure_glow` example, with the clipboard wired through the middle of it.
-//!
-//! Nothing about the wizard itself lives here; [`crate::ui`] draws every frame,
-//! and [`App::ui`] is called with the whole window to draw into.
+//! Creates the window and GL context and runs the winit event loop, forwarding
+//! events into egui and painting each frame through `crate::ui`.
+
+// ########## WINDOW AND EVENT LOOP ##########
 
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -169,7 +151,7 @@ impl ApplicationHandler<Wake> for Shell {
             // queue here, before egui-winit gets the chance to drop it.
             WindowEvent::KeyboardInput { event, .. } if event.state.is_pressed() => {
                 if let Some(egui) = &mut self.egui
-                    && is_paste(egui.state.egui_input().modifiers, event)
+                    && isPaste(egui.state.egui_input().modifiers, event)
                     && let Some(text) = paste()
                     && !text.is_empty()
                 {
@@ -296,7 +278,7 @@ impl Shell {
         for id in output.textures_delta.free {
             egui.painter.free_texture(id);
         }
-        let _ = gl.swap_buffers();
+        let _ = gl.swapBuffers();
 
         event_loop.set_control_flow(if repaint_after.is_zero() {
             gl.window.request_redraw();
@@ -315,7 +297,7 @@ impl Shell {
 /// The same three spellings egui recognises. `logical_key` is what the layout
 /// produces and `physical_key` is where the key sits, so a layout with no Latin
 /// `V` still pastes from the position `V` occupies on a US keyboard.
-fn is_paste(modifiers: egui::Modifiers, event: &winit::event::KeyEvent) -> bool {
+fn isPaste(modifiers: egui::Modifiers, event: &winit::event::KeyEvent) -> bool {
     use winit::keyboard::{Key, KeyCode, NamedKey, PhysicalKey};
 
     match &event.logical_key {
@@ -457,7 +439,7 @@ impl GlWindow {
         self.surface.resize(&self.context, width, height);
     }
 
-    fn swap_buffers(&self) -> glutin::error::Result<()> {
+    fn swapBuffers(&self) -> glutin::error::Result<()> {
         self.surface.swap_buffers(&self.context)
     }
 }

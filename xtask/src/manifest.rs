@@ -4,29 +4,24 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! The version contract, checked before anything is built.
-//!
-//! `x.y.z`, where **x is shared by every crate** and y and z belong to each one
-//! alone. x means "the way these programs talk to each other"; a launcher that
-//! gains a feature moves its own y and leaves everyone else's version alone.
-//!
-//! The listener enforces this at runtime, by asking a verified launcher for its
-//! version and refusing one whose x differs. That check is worth nothing if the
-//! programs ship with drifted majors in the first place, so [`check`] runs
-//! before `xtask release` builds anything — a release whose pieces disagree
-//! about their own compatibility generation should not reach a disk.
+//! Reads the workspace and member manifests, and checks every crate's major
+//! against `project_version`.
+
+// ########## THE VERSION CONTRACT ##########
 
 use std::fs;
 use std::path::Path;
 
+/// One workspace member's name and version, as its own manifest states them.
 pub struct Crate {
     pub name: String,
     pub version: String,
 }
 
-/// The project version from `[workspace.metadata.romzeta]`, and every member's.
+/// Reads the project version from `[workspace.metadata.romzeta]` and every
+/// member's own version. Fails with a sentence naming the manifest at fault.
 pub fn read(root: &Path) -> Result<(u64, Vec<Crate>), String> {
-    let text = read_manifest(&root.join("Cargo.toml"))?;
+    let text = readManifest(&root.join("Cargo.toml"))?;
     let table: toml::Table = text
         .parse()
         .map_err(|e| format!("the workspace Cargo.toml is not valid TOML: {e}"))?;
@@ -34,6 +29,7 @@ pub fn read(root: &Path) -> Result<(u64, Vec<Crate>), String> {
     let workspace = table
         .get("workspace")
         .and_then(|v| v.as_table())
+        // `ok_or` on an Option turns "key missing" into the error `?` wants.
         .ok_or("the root Cargo.toml has no [workspace]")?;
 
     let project_version = workspace
@@ -55,7 +51,7 @@ pub fn read(root: &Path) -> Result<(u64, Vec<Crate>), String> {
         .iter()
         .filter_map(|m| m.as_str())
         .map(|member| {
-            let text = read_manifest(&root.join(member).join("Cargo.toml"))?;
+            let text = readManifest(&root.join(member).join("Cargo.toml"))?;
             let table: toml::Table = text
                 .parse()
                 .map_err(|e| format!("{member}/Cargo.toml is not valid TOML: {e}"))?;
@@ -63,6 +59,8 @@ pub fn read(root: &Path) -> Result<(u64, Vec<Crate>), String> {
                 .get("package")
                 .ok_or_else(|| format!("{member}/Cargo.toml has no [package]"))?;
             Ok(Crate {
+                // A package may be named something other than its folder;
+                // the folder name is the fallback, not the answer.
                 name: package
                     .get("name")
                     .and_then(|v| v.as_str())
@@ -75,16 +73,19 @@ pub fn read(root: &Path) -> Result<(u64, Vec<Crate>), String> {
                     .to_string(),
             })
         })
+        // Collecting into a Result stops at the first bad manifest and hands
+        // back its error instead of a Vec of Results.
         .collect::<Result<Vec<_>, String>>()?;
 
     Ok((project_version as u64, crates))
 }
 
-/// Fails when any crate's major differs from the declared project version.
+/// Fails when any crate's major differs from the declared project version,
+/// returning that version when they all agree.
 ///
 /// Reports *every* mismatch rather than the first, because the fix is usually
-/// "these three are behind", and finding that out one rebuild at a time is a
-/// waste of a release.
+/// "these three are behind" and finding that out one rebuild at a time wastes
+/// a release.
 pub fn check(root: &Path) -> Result<u64, String> {
     let (project_version, crates) = read(root)?;
 
@@ -110,11 +111,12 @@ pub fn check(root: &Path) -> Result<u64, String> {
     Ok(project_version)
 }
 
-/// The `x` of an `x.y.z`.
+/// The `x` of an `x.y.z`, or `None` if the leading part is not a number.
 pub fn major(version: &str) -> Option<u64> {
     version.trim().split('.').next()?.parse().ok()
 }
 
-fn read_manifest(path: &Path) -> Result<String, String> {
+/// Reads a manifest, turning an IO error into a message naming the file.
+fn readManifest(path: &Path) -> Result<String, String> {
     fs::read_to_string(path).map_err(|e| format!("could not read {}: {e}", path.display()))
 }

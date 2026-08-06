@@ -44,7 +44,7 @@ put there, and the price of that is that the old advice ("delete EBWebView to cl
 cache") now has to name the child rather than the folder.
 
 A cartridge written before this layout keeps `images/` at the root, and nothing migrates it:
-the path lives in that cartridge's own `catalog.json`, and `assets::handle_request` serves
+the path lives in that cartridge's own `catalog.json`, and `assets::handleRequest` serves
 both prefixes. New cartridges get `assets/images/` because that is what the installer's
 `catalog::IMAGES_DIR` now writes.
 
@@ -141,7 +141,7 @@ is named in its section header), and the only file that knows both halves of the
 
 Because `src/` holds both source and web assets, `UiAssets`' rust-embed include list
 (`*.html`, `*.css`, `*.js`) is what keeps the Rust sources and the two seed files out of the
-bundle; `is_ui_asset()` applies the same extension list at runtime so the dev path can't
+bundle; `isUiAsset()` applies the same extension list at runtime so the dev path can't
 serve them either. That pair of lists is the one deliberate exception to the constants rule
 — `UI_ASSET_EXTENSIONS` stays beside the embed list it mirrors, because apart they drift.
 The font has a second embed struct of its own (`FontAssets`, over `assets/`), because
@@ -159,7 +159,7 @@ one list has to be tested on a built `output/launcher.exe`, not just in dev.
   `app://` custom protocol. On Windows this resolves to an `http://app.localhost/...`
   origin, which keeps wry's IPC (close / launch clicks) working — a raw `file://`
   origin would crash IPC.
-- **Content vs. UI.** `assets::handle_request` serves `assets/…`, `images/…` (the older
+- **Content vs. UI.** `assets::handleRequest` serves `assets/…`, `images/…` (the older
   spelling, kept so existing cartridges keep working) and `games/…` from disk beside the
   exe, and everything else as a UI asset (404 unless it passes `is_ui_asset`). The one
   exception is `fonts/…`, answered from the embedded `FontAssets` before the disk is
@@ -197,7 +197,7 @@ one list has to be tested on a built `output/launcher.exe`, not just in dev.
   on the toolbar; the rest of each is air. Margins and gap are in **logical (CSS) px** so
   they match the page's `PAD` / `GAP`; the page's `layout()` reproduces the same fit from
   the window height alone (scaling down only).
-- **Rounded corners come from Windows, not the page.** `window::round_corners` asks
+- **Rounded corners come from Windows, not the page.** `window::roundCorners` asks
   Windows 11 for them (`DwmSetWindowAttribute` / `DWMWA_WINDOW_CORNER_PREFERENCE`, which is
   anti-aliased and keeps the shadow) and falls back to clipping the window to a rounded
   region on Windows 10, where that attribute does not exist. The region is a one-bit mask,
@@ -275,7 +275,7 @@ a launch that failed says nothing about what the player wants to play next. The 
 happens while the page runs its outro, so nothing waits on it.
 
 Under `cargo run` the config is mirrored from `src/config.toml` every run — but
-`content::mirror_seed_config` carries these three keys across, so the seed owns look and
+`content::mirrorSeedConfig` carries these three keys across, so the seed owns look and
 feel while the launcher owns the order in dev exactly as it does on a cartridge.
 
 ## Launching a game
@@ -408,12 +408,12 @@ The launcher has no console, so `logs/` is the only place a failure can be expla
 
   **`loading_ring_segments` and `loading_ring_speed` are gone**, with the ring they
   described. No tombstone was needed: `load()` asks for keys one at a time rather than
-  enumerating the table, and `sync_defaults` only ever *adds* keys a file lacks, so a
+  enumerating the table, and `syncDefaults` only ever *adds* keys a file lacks, so a
   cartridge that still sets them is simply not asked and nothing complains.
 
   A deployed `config.toml` is written once and never rewritten, so a knob added after a
   cartridge's config existed would otherwise apply its default with nothing in the file
-  to reveal that. `config::sync_defaults()` runs on every startup and appends a
+  to reveal that. `config::syncDefaults()` runs on every startup and appends a
   commented-out `# key = default` line (with a short description) for any known setting
   the file doesn't mention — inert until uncommented, so it changes nothing about how the
   launcher already behaved, only what's discoverable in the file.
@@ -434,7 +434,7 @@ questions before this program starts.
 
 What is **not** covered by that signature is this program's own input. `catalog.json`,
 `config.toml`, `assets/` and `games/` sit unsigned on the same disk, and nothing could sign
-them, so the launcher treats them as untrusted: `catalog::is_contained` refuses any `exe` or
+them, so the launcher treats them as untrusted: `catalog::isContained` refuses any `exe` or
 `image` path that could escape the cartridge, and `launch::spawn` re-checks before it spawns
 anything. `Path::join` *discards* the base when handed `C:\…` or `\\host\share\…`, so without
 that check a signed, genuine launcher would happily start any executable on the machine.

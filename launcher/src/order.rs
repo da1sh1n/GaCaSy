@@ -4,33 +4,11 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! The order the covers are shown in.
-//!
-//! `config.toml` holds two id lists — `usage_order`, which the launcher writes
-//! after a game starts, and `user_order`, arranged by hand — and both are
-//! cartridge content: hand-editable, written by an older launcher, or written
-//! by this one and then edited badly. Neither is ever trusted to be a complete,
-//! duplicate-free permutation, so every read goes through [`normalize`] and
-//! comes out as one.
-//!
-//! # What an id is
-//!
-//! A game's position in the list [`crate::catalog::load`] returned — the same
-//! index `launch:<n>` and `window.__launchOutcome` already use. That is
-//! *usually* its line in `catalog.json`, but not always: `load` drops entries
-//! whose `exe` or `image` would escape the cartridge, and dropping one shifts
-//! every id after it. A cartridge in that state has a bigger problem than a
-//! shuffled row, and the alternative — a real id in catalog.json, written by
-//! the installer — would change a file format shared with another crate for no
-//! benefit anywhere else.
-//!
-//! # Two implementations
-//!
-//! The page carries this same rule in JS (`normalizeOrder` in `app.js`),
-//! because switching the order mode re-sorts the row live rather than by
-//! restarting. That is the same deliberate duplication as [`crate::window`]'s
-//! sizing math and the page's `layout()`: small, stated, and kept in step by
-//! being written down in both places.
+//! Turns a stored id list into a usable cover order: `normalize` repairs a
+//! partial, duplicated or out-of-range list into a full permutation, and
+//! `promote` moves one id to the front.
+
+// ########## COVER ORDER ##########
 
 /// A stored id list turned into a complete permutation of `0..count`.
 ///
@@ -78,6 +56,6 @@ pub const MODES: [&str; 4] = ["usage", "alphabetic", "catalog", "user"];
 /// Whether `name` is one of [`MODES`]. Used both when reading the config and
 /// when the page asks to change it — an unknown mode is left at the default
 /// rather than stored and puzzled over on the next run.
-pub fn is_mode(name: &str) -> bool {
+pub fn isMode(name: &str) -> bool {
     MODES.contains(&name)
 }

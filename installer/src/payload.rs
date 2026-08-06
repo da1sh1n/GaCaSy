@@ -4,27 +4,11 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! Everything the installer writes, carried inside it.
-//!
-//! One self-contained exe: no downloads, no prerequisites, no side-by-side
-//! files. `build.rs` stages each of these in `OUT_DIR` and fails the build with
-//! a clear message when one is missing, so the bytes below are always either the
-//! real artifact or — under the documented `ROMZETA_PAYLOAD_OPTIONAL` escape
-//! hatch — deliberately empty.
-//!
-//! # The two programs are compressed
-//!
-//! An exe is about half its size deflated and this installer is mostly two other
-//! programs, so they are packed at build time and unpacked at the moment they are
-//! written.
-//!
-//! Unpacking has to be **exact**, not merely correct-looking: the minisign
-//! signature inside `launcher.exe` is what makes a cartridge a cartridge, and a
-//! single wrong byte produces a launcher every listener silently ignores. Deflate
-//! is lossless, `build.rs` checks the signature against the bytes it packs, and
-//! [`crate::cartridge`] writes what comes back out — but this is the reason the
-//! unpacked length is compared against the size recorded at build time before
-//! anything is written.
+//! Exposes the bytes `build.rs` embedded — launcher, listener, seed config and
+//! catalog — and inflates the two compressed binaries, checking the unpacked
+//! length against the size recorded at build time.
+
+// ########## THE EMBEDDED PAYLOAD ##########
 
 // Sizes these unpack back to, written by `build.rs`: `LAUNCHER_BYTES` and
 // `LISTENER_BYTES`. The free-space check needs the real size, and a compressed
@@ -37,13 +21,10 @@ include!(concat!(env!("OUT_DIR"), "/launcher-version.rs"));
 
 /// The cartridge's app, written to `<volume>/launcher.exe` — packed.
 ///
-/// Unpacked, these bytes carry their own minisign signature, appended past the
-/// end of the image by `xtask sign` before this crate was built (see the sigblock
-/// crate). That signature *is* the cartridge's identity — the listener reads it
-/// off the disk and refuses a launcher it cannot verify — so writing these bytes
-/// onto a volume is the entire act of making that volume trusted. `build.rs`
-/// verifies the signature before packing, so an installer that would produce
-/// cartridges its own listener rejects cannot be built.
+/// Unpacked, these bytes carry the minisign signature `xtask sign` appended
+/// before this crate was built, and that signature *is* the cartridge's
+/// identity. `build.rs` verifies it before packing, so an installer that would
+/// produce cartridges its own listener rejects cannot be built.
 const LAUNCHER_EXE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/launcher.exe.z"));
 
 /// The PC-side service, written into the listener's install folder — packed.

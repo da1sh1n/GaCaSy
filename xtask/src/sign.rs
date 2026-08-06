@@ -4,30 +4,33 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! Putting a signature into a binary, and reading one back out.
-//!
-//! Both directions go through [`sigblock`], so the bytes this crate signs are
-//! exactly the bytes the listener will verify. The asymmetry worth knowing: we
-//! sign with `minisign` (the reference implementation) and verify with
-//! `minisign-verify` (what the listener links). Verifying with the same library
-//! that just signed would prove only that it agrees with itself.
+//! Signs a binary in place and verifies one, both through `sigblock`. Signs
+//! with `minisign`, verifies with `minisign-verify`.
+
+// ########## SIGNING AND VERIFYING ##########
 
 use std::fs;
 use std::path::Path;
 
 use crate::keys::Anchor;
 
-/// Signs `path` in place.
+// ========== Signing ==========
+
+/// Signs the file at `path` in place with `key`, writing `comment` and today's
+/// date into the trusted comment.
 ///
-/// In place, and idempotent: [`sigblock::attach`] strips any block already
-/// there, so signing an exe twice replaces its signature rather than burying
-/// the old one inside the new signed payload. `cargo build` and this function
-/// both write to `target/release/`, in whatever order you happen to run them.
+/// Idempotent: `sigblock::attach` strips any block already there, so signing an
+/// exe twice replaces its signature instead of burying the old one inside the
+/// new signed payload.
 pub fn sign(path: &Path, key: &minisign::SecretKey, comment: &str) -> Result<(), String> {
     let bytes = fs::read(path).map_err(|e| format!("could not read {}: {e}", path.display()))?;
+    // Sign the payload, not the file: an already-signed exe must not have its
+    // old block folded into what the new signature covers.
     let (payload, _) = sigblock::split(&bytes);
 
-    let trusted = format!("{comment} {}", today());
+    let trusted = format!("{comment} {}", common::time::today());
+    // The trusted comment is signed alongside the payload; the untrusted one
+    // (the last argument) is free text nothing checks.
     let signature = minisign::sign(None, key, payload, Some(&trusted), Some(comment))
         .map_err(|e| format!("could not sign {}: {e}", path.display()))?
         .into_string();
@@ -36,18 +39,21 @@ pub fn sign(path: &Path, key: &minisign::SecretKey, comment: &str) -> Result<(),
         .map_err(|e| format!("could not write {}: {e}", path.display()))
 }
 
+// ========== Verifying ==========
+
 /// What a signed binary turned out to be.
 #[derive(Debug)]
 pub struct Verified {
-    /// Which trust anchor accepted it — `romzeta` for a release build, `dev` for
-    /// one of yours.
+    /// Which trust anchor accepted it — `romzeta` for a release build, `dev`
+    /// for one of yours.
     pub anchor: String,
-    /// The signer's trusted comment, which minisign authenticates along with the
-    /// file. Free text; nothing depends on its shape.
+    /// The signer's trusted comment, which minisign authenticates along with
+    /// the file. Free text; nothing depends on its shape.
     pub comment: String,
 }
 
-/// Verifies `path` against `anchors`, the way the listener will.
+/// Verifies the file at `path` against `anchors`, the way the listener will.
+/// Returns which anchor accepted it, or a sentence explaining the refusal.
 pub fn verify(path: &Path, anchors: &[Anchor]) -> Result<Verified, String> {
     let bytes = fs::read(path).map_err(|e| format!("could not read {}: {e}", path.display()))?;
     let (payload, signature) = sigblock::split(&bytes);
@@ -61,17 +67,23 @@ pub fn verify(path: &Path, anchors: &[Anchor]) -> Result<Verified, String> {
     let signature = minisign_verify::Signature::decode(signature)
         .map_err(|e| format!("{} has a malformed signature: {e}", path.display()))?;
 
+    // Distinct from "signed by a stranger": no keys at all is a broken checkout,
+    // and saying so beats reporting every binary as untrusted.
     if anchors.is_empty() {
         return Err("no public keys to check against — keys/romzeta.pub is missing".to_string());
     }
 
     for anchor in anchors {
         let Ok(key) = minisign_verify::PublicKey::from_base64(&anchor.base64) else {
+            // A key file we control, so a bad one is an error worth stopping on
+            // rather than something to skip past like `trust::attest` does.
             return Err(format!(
                 "keys/{}.pub is not a minisign public key",
                 anchor.name
             ));
         };
+        // `false` refuses minisign's pre-1.0 signature format, matching the
+        // listener exactly — this check has to reach the same conclusion it will.
         if key.verify(payload, &signature, false).is_ok() {
             return Ok(Verified {
                 anchor: anchor.name.to_string(),
@@ -90,29 +102,4 @@ pub fn verify(path: &Path, anchors: &[Anchor]) -> Result<Verified, String> {
             .collect::<Vec<_>>()
             .join(", ")
     ))
-}
-
-/// `YYYY-MM-DD`, for the trusted comment.
-///
-/// Hand-rolled from the system clock rather than pulling in a date library for
-/// one line of provenance text that nothing parses. Civil-from-days, after
-/// Howard Hinnant's algorithm; correct for any date this project will see.
-fn today() -> String {
-    let days = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() / 86_400)
-        .unwrap_or(0) as i64;
-
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-
-    format!("{y:04}-{m:02}-{d:02}")
 }

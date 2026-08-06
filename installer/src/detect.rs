@@ -4,20 +4,11 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! Finding the exe inside a game folder — the fiddliest part of job 1.
-//!
-//! A game install is full of executables that are not the game: uninstallers,
-//! redistributable bundles, crash handlers, engine tools. This module walks the
-//! folder once, throws out the ones that are never the answer, and scores what
-//! is left so the likeliest is preselected.
-//!
-//! It is a guess, and it is presented as one. The user can always override the
-//! pick, and when the scoring finds no clear winner the UI *requires* them to
-//! choose rather than quietly taking the top row.
-//!
-//! The same walk measures the folder, because the copy needs a byte total for
-//! the free-space check and walking a multi-gigabyte install twice is a wait the
-//! user would feel.
+//! Walks a game folder, rejects executables that are never the game, and scores
+//! the rest so the likeliest can be preselected. The same walk returns the
+//! folder's file count and byte total.
+
+// ########## FINDING THE GAME'S EXE ##########
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -62,7 +53,7 @@ impl Candidate {
     /// and the form shown in the picker, so what the user chose and what was
     /// written are visibly the same string.
     pub fn display(&self) -> String {
-        crate::catalog::to_relative_string(&self.relative)
+        crate::catalog::toRelativeString(&self.relative)
     }
 }
 
@@ -81,7 +72,7 @@ impl Scan {
     ///
     /// `None` covers both halves of the spec's rule: nothing survived the reject
     /// list, or the top two are too close to call.
-    pub fn clear_winner(&self) -> Option<&Candidate> {
+    pub fn clearWinner(&self) -> Option<&Candidate> {
         let best = self.candidates.first()?;
         match self.candidates.get(1) {
             Some(runner_up) if best.score - runner_up.score < CLEAR_WINNER_MARGIN => None,
@@ -156,7 +147,7 @@ fn walk(dir: &Path, relative: &Path, depth: usize, cancel: &AtomicBool, scan: &m
         scan.total_bytes += bytes;
         scan.file_count += 1;
 
-        if is_executable(&child) && !is_rejected(&child) && bytes >= MIN_PLAUSIBLE_BYTES {
+        if isExecutable(&child) && !isRejected(&child) && bytes >= MIN_PLAUSIBLE_BYTES {
             scan.candidates.push(Candidate {
                 relative: child,
                 bytes,
@@ -166,7 +157,7 @@ fn walk(dir: &Path, relative: &Path, depth: usize, cancel: &AtomicBool, scan: &m
     }
 }
 
-fn is_executable(relative: &Path) -> bool {
+fn isExecutable(relative: &Path) -> bool {
     relative
         .extension()
         .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"))
@@ -177,7 +168,7 @@ fn is_executable(relative: &Path) -> bool {
 /// Two kinds of rule, both from `../structure.md`: names that give the file away
 /// (`unins000.exe`, `vcredist_x64.exe`, `UnityCrashHandler64.exe`) and folders
 /// whose entire contents are somebody else's binaries shipped alongside the game.
-pub fn is_rejected(relative: &Path) -> bool {
+pub fn isRejected(relative: &Path) -> bool {
     const REJECTED_DIRS: [&str; 3] = ["redist", "_commonredist", "directx"];
 
     let name = relative
@@ -216,11 +207,11 @@ pub fn is_rejected(relative: &Path) -> bool {
         .any(|w| w == ["engine", "binaries", "thirdparty"])
 }
 
-/// Ranks a surviving executable. Higher is likelier to be the game.
+/// Ranks a surviving executable; higher is likelier to be the game.
 ///
-/// Shallow beats deep, a name matching the folder beats one that doesn't, and
-/// size only breaks ties — in that order of importance, which is why the name
-/// bonus is worth several depth levels and the size score is capped below one.
+/// Shallow beats deep, a name matching the folder beats one that does not, and
+/// size only breaks ties. The name bonus therefore outweighs several depth
+/// levels, and the size score is capped below one.
 fn score(relative: &Path, folder_name: &str, bytes: u64) -> i64 {
     let depth = relative.components().count().saturating_sub(1) as i64;
     let mut score = -depth * DEPTH_PENALTY;
@@ -259,7 +250,7 @@ fn squash(text: &str) -> String {
 /// Trailing version noise is left alone: guessing wrong about `Game v1.2` costs
 /// the user an edit either way, and stripping it wrongly is the one that loses
 /// information.
-pub fn default_name(folder: &Path) -> String {
+pub fn defaultName(folder: &Path) -> String {
     folder
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
@@ -268,7 +259,7 @@ pub fn default_name(folder: &Path) -> String {
 
 /// Names already used on the cartridge, for the duplicate check the games screen
 /// runs before accepting a folder.
-pub fn taken_slugs(entries: &[crate::catalog::Entry]) -> HashSet<String> {
+pub fn takenSlugs(entries: &[crate::catalog::Entry]) -> HashSet<String> {
     entries
         .iter()
         .filter_map(|e| {

@@ -4,17 +4,10 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! `catalog.json` — the game list, as the launcher deserializes it.
-//!
-//! The producer side of `../../launcher/src/catalog.rs`: an array of
-//! `{ name, exe, image }` with both paths **relative to the cartridge root**
-//! (`games/bg3/bg3.exe`, `assets/images/bg3.png`). The launcher joins them onto
-//! its own folder, so an absolute path here would produce a cartridge that only
-//! works on the machine that made it.
-//!
-//! Separators are always `/`. Windows joins either kind, and a cartridge with
-//! backslashes in its catalog would stop working the day a Linux launcher reads
-//! it.
+//! Writes and reads `catalog.json`, and derives the slugs and paths its entries
+//! hold. Paths are relative to the cartridge root with `/` as the separator.
+
+// ########## CATALOG.JSON ##########
 
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -68,8 +61,8 @@ pub fn write(root: &Path, entries: &[Entry]) -> std::io::Result<()> {
 }
 
 /// `games/<slug>/<exe>` for the catalog's `exe` field.
-pub fn exe_path(slug: &str, exe_relative: &Path) -> String {
-    format!("{GAMES_DIR}/{slug}/{}", to_relative_string(exe_relative))
+pub fn exePath(slug: &str, exeRelative: &Path) -> String {
+    format!("{GAMES_DIR}/{slug}/{}", toRelativeString(exeRelative))
 }
 
 /// `images/<slug>.<ext>` for the catalog's `image` field.
@@ -78,7 +71,7 @@ pub fn exe_path(slug: &str, exe_relative: &Path) -> String {
 /// `.png`: the launcher hands the path to the webview, which goes by content and
 /// not by name, and renaming a `.jpg` to `.png` only makes the cartridge harder
 /// to understand later.
-pub fn image_path(slug: &str, source: &Path) -> String {
+pub fn imagePath(slug: &str, source: &Path) -> String {
     let ext = source
         .extension()
         .map(|e| e.to_string_lossy().to_ascii_lowercase())
@@ -88,7 +81,7 @@ pub fn image_path(slug: &str, source: &Path) -> String {
 
 /// A path relative to something, as the catalog spells it: `/` separators, no
 /// leading `./`.
-pub fn to_relative_string(path: &Path) -> String {
+pub fn toRelativeString(path: &Path) -> String {
     path.components()
         .filter_map(|c| match c {
             Component::Normal(part) => Some(part.to_string_lossy().to_string()),
@@ -124,7 +117,7 @@ pub fn slug(name: &str) -> String {
 /// slug (`Game: II` and `Game II`). Two adds of the same folder are refused up
 /// in the games screen, where the user can still do something about it — see
 /// `../structure.md`, "Adding the same game twice".
-pub fn unique_slug(name: &str, taken: &mut std::collections::HashSet<String>) -> String {
+pub fn uniqueSlug(name: &str, taken: &mut std::collections::HashSet<String>) -> String {
     let base = slug(name);
     let mut candidate = base.clone();
     let mut n = 2;
@@ -140,7 +133,7 @@ pub fn unique_slug(name: &str, taken: &mut std::collections::HashSet<String>) ->
 ///
 /// Used by remove, which deletes that folder — so a path escaping the cartridge
 /// (`../../Windows`) must resolve to nothing rather than to a directory tree.
-pub fn game_dir(root: &Path, entry: &Entry) -> Option<PathBuf> {
+pub fn gameDir(root: &Path, entry: &Entry) -> Option<PathBuf> {
     let mut parts = Vec::new();
     for component in Path::new(&entry.exe).components() {
         match component {
@@ -157,7 +150,7 @@ pub fn game_dir(root: &Path, entry: &Entry) -> Option<PathBuf> {
 }
 
 /// The cover file on the cartridge for one entry, with the same escape check.
-pub fn image_file(root: &Path, entry: &Entry) -> Option<PathBuf> {
+pub fn imageFile(root: &Path, entry: &Entry) -> Option<PathBuf> {
     let mut resolved = root.to_path_buf();
     let mut parts = 0;
     for component in Path::new(&entry.image).components() {

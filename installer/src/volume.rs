@@ -4,54 +4,21 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! Which drives may become a cartridge.
+//! Which drives may become a cartridge: external storage only. The drive
+//! Windows is on and every internal disk are refused.
 //!
-//! **External storage only.** The drive Windows is installed on is refused
-//! outright, and so is every internal disk. A cartridge is a thing you unplug
-//! and carry to another PC, and making one means copying many gigabytes onto a
-//! volume and — in edit mode — deleting folders from it. Pointing that at `C:\`
-//! is not a supported choice that happens to be unwise; it is not offered.
+//! Externality comes from the hardware, not `DRIVE_REMOVABLE` — a USB SSD in an
+//! enclosure reports `DRIVE_FIXED` like an internal disk. So
+//! `IOCTL_STORAGE_QUERY_PROPERTY` supplies the bus type, and USB, FireWire, SD
+//! and MMC count as external. The query wants a handle with zero access rights,
+//! so none of this needs administrator. A Thunderbolt/PCIe enclosure reports
+//! `BusTypeNvme` and is refused; Windows-To-Go passes the bus test, so the
+//! system-drive check runs first.
 //!
-//! This is deliberately **stricter than the listener**, which starts a correctly
-//! signed launcher from any volume it sees (`../../listener/src/volume.rs`). The
-//! asymmetry is the right way round: the listener decides whether to *run*
-//! something already on a disk, while this decides where to *write* gigabytes. A
-//! cartridge someone hand-assembles on an internal disk still works — the
-//! installer just won't make one there.
-//!
-//! ## What counts as external
-//!
-//! Not `DRIVE_REMOVABLE`, which is the tempting answer and the wrong one: a USB
-//! SSD in an enclosure — precisely the drive a game cartridge wants to be —
-//! reports as `DRIVE_FIXED`, exactly like the disk Windows is installed on.
-//! Filtering on it would reject the best candidates and admit none of the ones
-//! it was meant to catch.
-//!
-//! So the question is asked of the hardware instead:
-//! `IOCTL_STORAGE_QUERY_PROPERTY` for the underlying disk's **bus type**. USB,
-//! FireWire, SD and MMC are external; SATA, NVMe, SAS, RAID and the rest are not.
-//! The query wants a handle opened with *zero* access rights, which is why none
-//! of this needs administrator.
-//!
-//! Two consequences worth knowing:
-//!
-//! * A **Thunderbolt/PCIe** enclosure presents its disk as `BusTypeNvme`,
-//!   indistinguishable from an internal one, so it is treated as internal and
-//!   refused. That is the conservative direction to be wrong in: the cost is a
-//!   drive you can't pick, not a system disk you can.
-//! * **Windows-To-Go** on a USB stick passes the bus test, so the system-drive
-//!   check runs first, separately, and wins.
-//!
-//! ## Naming
-//!
-//! A cartridge's name is its **volume label**, and [`set_label`] is the one
-//! thing in this module that writes. There is nowhere else for a name to live:
-//! `config.toml` is look and feel, `catalog.json` is the game list, and identity
-//! is a signature inside `launcher.exe`. So the label is the whole of it — read
-//! by [`Volume::summary`], set at the end of a write.
-//!
-//! Nothing here formats, partitions or erases anything. The installer writes
-//! files to a volume, and a name onto it; it never repartitions one.
+//! A cartridge's name is its volume label. `setLabel` is the only write here;
+//! nothing formats, partitions or erases.
+
+// ########## ELIGIBLE VOLUMES ##########
 
 use std::path::{Path, PathBuf};
 
@@ -63,20 +30,15 @@ use trust::Anchor;
 // could edit it decide what this program trusts.
 include!(concat!(env!("OUT_DIR"), "/trust_anchors.rs"));
 
-/// The version of `<root>/launcher.exe`, if it is a launcher we signed.
+/// The version of `<root>/launcher.exe`, if it is a launcher this build's keys
+/// vouch for. `None` for no launcher, an unsigned one, a stranger's, or a
+/// genuine Romzeta binary that is not a launcher — all four mean "not a
+/// cartridge this installer made", which is the only distinction the next
+/// screen needs.
 ///
-/// `None` for a drive with no launcher, an unsigned one, one signed by a key
-/// this build does not carry, or a genuine Romzeta binary that is not a launcher.
-/// All four mean the same thing here — this is not a cartridge this installer
-/// made — and none of them are worth telling apart on a screen whose next
-/// question is "create or edit?".
-///
-/// **Nothing is executed.** The version comes out of the signed comment. The
-/// installer used to spawn this file with `--version` and read what it printed,
-/// which meant running an arbitrary binary off a stranger's USB stick to decide
-/// what it was: the exact thing `listener/src/trust.rs` explains it must never
-/// do, done by the program next door.
-pub fn attested_launcher(root: &Path) -> Option<String> {
+/// **Nothing is executed**: the version comes out of the signed comment, so no
+/// binary off a stranger's USB stick is ever run to find out what it is.
+pub fn attestedLauncher(root: &Path) -> Option<String> {
     let path = root.join(crate::cartridge::LAUNCHER_NAME);
     if !path.is_file() {
         return None;
@@ -122,7 +84,7 @@ pub struct Volume {
     /// cartridge's name — the one the installer can change, and the only piece
     /// of a cartridge that lives outside its file layout.
     pub label: String,
-    /// `NTFS`, `exFAT`, `FAT32` — read for [`Volume::max_label_len`], since what
+    /// `NTFS`, `exFAT`, `FAT32` — read for [`Volume::maxLabelLen`], since what
     /// a label may contain is a property of the filesystem and nothing else.
     pub fs: String,
     /// How the disk underneath is attached — "USB", "NVMe", "SATA". Shown so a
@@ -131,19 +93,11 @@ pub struct Volume {
     pub eligibility: Eligibility,
     pub free_bytes: u64,
     pub total_bytes: u64,
-    /// Already carries a launcher **we verified** — routes to edit mode instead
-    /// of create.
-    ///
-    /// This used to be presence of the file alone, on the reasoning that picking
-    /// the wrong screen costs a wrong starting catalog rather than a wrong trust
-    /// decision. That was wrong twice over. It is a trust decision, because the
-    /// edit path goes on to read — and previously to *execute* — what it found;
-    /// and it is one the user sees, because the picker vouches for the drive in
-    /// so many words.
-    ///
-    /// So the signature is checked, by the same call the listener makes. An
-    /// unsigned or foreign `launcher.exe` means create mode, which is the honest
-    /// answer: nothing here made that file and nothing here can edit it.
+    /// Already carries a launcher **we verified** — routes to edit mode rather
+    /// than create. Checked by the same call the listener makes, not by the
+    /// file's presence: the edit path goes on to read what it found, and the
+    /// picker vouches for the drive on screen. An unsigned or foreign
+    /// `launcher.exe` means create mode, which is the honest answer.
     pub is_cartridge: bool,
 
     /// The launcher version its signature states, when it is one of ours. Read
@@ -167,16 +121,16 @@ impl Volume {
         if self.total_bytes > 0 {
             text.push_str(&format!(
                 " ({} free of {})",
-                human_bytes(self.free_bytes),
-                human_bytes(self.total_bytes)
+                humanBytes(self.free_bytes),
+                humanBytes(self.total_bytes)
             ));
         }
         text
     }
 
-    /// How long a name this drive will accept — see [`max_label_len`].
-    pub fn max_label_len(&self) -> usize {
-        max_label_len(&self.fs)
+    /// How long a name this drive will accept — see [`maxLabelLen`].
+    pub fn maxLabelLen(&self) -> usize {
+        maxLabelLen(&self.fs)
     }
 }
 
@@ -187,16 +141,16 @@ impl Volume {
 /// smaller one: this check exists to catch a too-long name before the user sits
 /// through a copy, and Windows itself is the authority at the moment of writing.
 /// Guessing low would refuse names that would have worked.
-pub fn max_label_len(fs: &str) -> usize {
-    if is_fat(fs) { 11 } else { 32 }
+pub fn maxLabelLen(fs: &str) -> usize {
+    if isFat(fs) { 11 } else { 32 }
 }
 
-fn is_exfat(fs: &str) -> bool {
+fn isExfat(fs: &str) -> bool {
     fs.eq_ignore_ascii_case("exFAT")
 }
 
-fn is_fat(fs: &str) -> bool {
-    is_exfat(fs) || fs.to_ascii_uppercase().starts_with("FAT")
+fn isFat(fs: &str) -> bool {
+    isExfat(fs) || fs.to_ascii_uppercase().starts_with("FAT")
 }
 
 /// Characters this filesystem will not put in a label.
@@ -211,25 +165,23 @@ fn forbidden(fs: &str) -> &'static [char] {
         '*', '?', '/', '\\', '|', '.', ',', ';', ':', '+', '=', '[', ']', '<', '>', '"',
     ];
     const EXFAT: [char; 9] = ['*', '?', '/', '\\', '|', ':', '<', '>', '"'];
-    if is_exfat(fs) {
+    if isExfat(fs) {
         &EXFAT
-    } else if is_fat(fs) {
+    } else if isFat(fs) {
         &FAT
     } else {
         &[]
     }
 }
 
-/// Whether `name` can be this filesystem's volume label.
+/// Whether `name` can be this filesystem's volume label. An empty name is
+/// valid and means "no label".
 ///
-/// An **empty name is valid** and means "no label" — clearing a cartridge's name
-/// is as legitimate as setting one.
-///
-/// Checked here rather than only at the write because the write happens at the
-/// end of a job that may have spent minutes copying: a name that was never going
-/// to land should stop the Review button, not the last step of the copy.
-pub fn validate_label(name: &str, fs: &str) -> Result<(), String> {
-    let limit = max_label_len(fs);
+/// Checked here as well as at the write, because the write happens at the end
+/// of a job that may have spent minutes copying — a name that was never going
+/// to land should stop the Review button, not the last step.
+pub fn validateLabel(name: &str, fs: &str) -> Result<(), String> {
+    let limit = maxLabelLen(fs);
     let length = name.chars().count();
     if length > limit {
         let filesystem = if fs.is_empty() { "this drive" } else { fs };
@@ -250,8 +202,8 @@ pub fn validate_label(name: &str, fs: &str) -> Result<(), String> {
 ///
 /// An empty `name` clears the label. Nothing else about the volume is touched:
 /// this sets a string, and is not a format.
-pub fn set_label(root: &Path, name: &str) -> Result<(), String> {
-    platform::set_label(root, name)
+pub fn setLabel(root: &Path, name: &str) -> Result<(), String> {
+    platform::setLabel(root, name)
 }
 
 /// The drives a cartridge can be made on, in drive-letter order.
@@ -280,7 +232,7 @@ pub(crate) fn all() -> Vec<Volume> {
 /// Rounded to three significant-ish digits, in the units a drive is sold in
 /// (powers of 1000), so the number matches the one on the box and in Explorer's
 /// properties dialog.
-pub fn human_bytes(bytes: u64) -> String {
+pub fn humanBytes(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
     let mut value = bytes as f64;
     let mut unit = 0;
@@ -309,18 +261,18 @@ pub fn human_bytes(bytes: u64) -> String {
 /// Three variables are consulted and **any** match vetoes. They can each be
 /// missing or tampered with, and requiring only one to match means no single
 /// absent variable can quietly switch the veto off.
-pub fn is_system_drive(root: &Path) -> bool {
-    let Some(letter) = drive_letter(root) else {
+pub fn isSystemDrive(root: &Path) -> bool {
+    let Some(letter) = driveLetter(root) else {
         return false;
     };
     ["SystemRoot", "windir", "SystemDrive"]
         .iter()
         .filter_map(std::env::var_os)
-        .any(|value| drive_letter(Path::new(&value)) == Some(letter))
+        .any(|value| driveLetter(Path::new(&value)) == Some(letter))
 }
 
 /// The uppercase drive letter of a path — `e:\games` → `Some('E')`.
-pub(crate) fn drive_letter(path: &Path) -> Option<char> {
+pub(crate) fn driveLetter(path: &Path) -> Option<char> {
     let text = path.to_string_lossy();
     let mut chars = text.chars();
     let letter = chars.next()?.to_ascii_uppercase();
@@ -329,9 +281,11 @@ pub(crate) fn drive_letter(path: &Path) -> Option<char> {
 
 #[cfg(windows)]
 mod platform {
-    use super::{Eligibility, Volume, is_system_drive};
+    use super::{Eligibility, Volume, isSystemDrive};
     use std::path::PathBuf;
     use std::ptr;
+
+    use common::utf16::{fromWide, wide};
 
     use windows_sys::Win32::Foundation::{
         CloseHandle, ERROR_ACCESS_DENIED, ERROR_INVALID_NAME, ERROR_LABEL_TOO_LONG,
@@ -379,27 +333,27 @@ mod platform {
         // An empty card reader has a drive letter and no volume behind it.
         // Every call below fails on one, and a row saying "0 B free" for a slot
         // with nothing in it is worse than no row at all.
-        let (free_bytes, total_bytes) = free_space(&wide_root)?;
+        let (free_bytes, total_bytes) = freeSpace(&wide_root)?;
         let root = PathBuf::from(&root);
 
-        let bus = bus_type(letter);
-        let eligibility = if is_system_drive(&root) {
+        let bus = busType(letter);
+        let eligibility = if isSystemDrive(&root) {
             // First, and unconditional. A Windows-To-Go stick sits on a USB bus
             // and must still be refused: what makes this drive unusable is what
             // is installed on it, not how it is attached.
             Eligibility::SystemDrive
-        } else if is_external(bus, drive_type) {
+        } else if isExternal(bus, drive_type) {
             Eligibility::Allowed
         } else {
             Eligibility::Internal
         };
 
-        let (label, fs) = volume_info(&wide_root);
-        let launcher_version = super::attested_launcher(&root);
+        let (label, fs) = volumeInfo(&wide_root);
+        let launcher_version = super::attestedLauncher(&root);
         Some(Volume {
             label,
             fs,
-            bus: bus_name(bus, drive_type),
+            bus: busName(bus, drive_type),
             eligibility,
             free_bytes,
             total_bytes,
@@ -417,7 +371,7 @@ mod platform {
     /// answer, taken in the conservative direction: only a drive Windows itself
     /// calls *removable* gets through, so an unidentifiable fixed disk is refused
     /// rather than guessed at.
-    fn is_external(bus: Option<STORAGE_BUS_TYPE>, drive_type: u32) -> bool {
+    fn isExternal(bus: Option<STORAGE_BUS_TYPE>, drive_type: u32) -> bool {
         match bus {
             Some(bus) => EXTERNAL.contains(&bus),
             None => drive_type == DRIVE_REMOVABLE,
@@ -429,7 +383,7 @@ mod platform {
     /// Opened with **zero** desired access — enough to send a query IOCTL, and
     /// the reason this needs no administrator. Asking for `GENERIC_READ` here
     /// would put a UAC wall in front of the whole drive picker.
-    fn bus_type(letter: char) -> Option<STORAGE_BUS_TYPE> {
+    fn busType(letter: char) -> Option<STORAGE_BUS_TYPE> {
         // `\\.\E:` — the volume device, with no trailing backslash.
         let path = wide(&format!(r"\\.\{letter}:"));
         let handle = unsafe {
@@ -482,7 +436,7 @@ mod platform {
     }
 
     /// A short name for the bus, for the line explaining a refusal.
-    fn bus_name(bus: Option<STORAGE_BUS_TYPE>, drive_type: u32) -> &'static str {
+    fn busName(bus: Option<STORAGE_BUS_TYPE>, drive_type: u32) -> &'static str {
         let Some(bus) = bus else {
             return if drive_type == DRIVE_REMOVABLE {
                 "removable"
@@ -510,7 +464,7 @@ mod platform {
         }
     }
 
-    fn free_space(root: &[u16]) -> Option<(u64, u64)> {
+    fn freeSpace(root: &[u16]) -> Option<(u64, u64)> {
         let mut free = 0u64;
         let mut total = 0u64;
         let ok = unsafe {
@@ -529,8 +483,8 @@ mod platform {
 
     /// The volume's label and its filesystem name, both from the one call that
     /// knows them. The filesystem is read because it, and nothing else, decides
-    /// what a label may be — see [`super::validate_label`].
-    fn volume_info(root: &[u16]) -> (String, String) {
+    /// what a label may be — see [`super::validateLabel`].
+    fn volumeInfo(root: &[u16]) -> (String, String) {
         let mut label = [0u16; 261]; // MAX_PATH + 1, the documented size
         let mut fs = [0u16; 261];
         let ok = unsafe {
@@ -548,10 +502,10 @@ mod platform {
         if ok == 0 {
             return (String::new(), String::new());
         }
-        (from_wide(&label), from_wide(&fs))
+        (fromWide(&label), fromWide(&fs))
     }
 
-    pub fn set_label(root: &std::path::Path, name: &str) -> Result<(), String> {
+    pub fn setLabel(root: &std::path::Path, name: &str) -> Result<(), String> {
         // `SetVolumeLabelW` wants the root *with* its trailing backslash, which
         // is the shape `Volume::root` already holds.
         let root = wide(&root.display().to_string());
@@ -577,16 +531,6 @@ mod platform {
             other => format!("Windows error {other}"),
         })
     }
-
-    fn wide(text: &str) -> Vec<u16> {
-        text.encode_utf16().chain(std::iter::once(0)).collect()
-    }
-
-    /// A NUL-terminated wide buffer as a `String`.
-    fn from_wide(buffer: &[u16]) -> String {
-        let end = buffer.iter().position(|c| *c == 0).unwrap_or(buffer.len());
-        String::from_utf16_lossy(&buffer[..end])
-    }
 }
 
 #[cfg(not(windows))]
@@ -600,7 +544,7 @@ mod platform {
         Vec::new()
     }
 
-    pub fn set_label(_root: &std::path::Path, _name: &str) -> Result<(), String> {
+    pub fn setLabel(_root: &std::path::Path, _name: &str) -> Result<(), String> {
         Err("renaming a drive is Windows-only".into())
     }
 }

@@ -8,6 +8,10 @@ license = "GPL-3.0-or-later"
 # Where the signature lives inside launcher.exe. Zero dependencies of its own.
 sigblock = { path = "../sigblock" }
 
+# Log timestamps and rotation, UTF-16 for the Win32 calls below, and the x.y.z
+# parser — all of it shared with the launcher and the installer.
+common = { path = "../common" }
+
 # Whether that signature makes a binary safe to run. Shared with the installer,
 # which needs the same answer and used to reach a different one. It pulls in
 # minisign-verify (verify-only on purpose: nothing that ships has any business

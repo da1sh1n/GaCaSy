@@ -4,30 +4,20 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! The bit of the registry API this installer actually uses.
+//! Wraps the registry calls this crate uses: open, create, read and write
+//! string values, enumerate names, delete.
 //!
-//! Three places need it and they need the same handful of operations, so it lives
-//! here rather than three times: [`crate::listener`] writes the `HKCU\…\Run` entry
-//! that starts the listener at login, [`crate::autoplay`] rewrites the AutoPlay
-//! choice for removable drives, and [`crate::font`] looks up where the system UI
-//! font's file lives.
-//!
-//! **Nothing here writes `HKLM` or asks for administrator.** The two keys this
-//! program modifies are per-user, under `HKEY_CURRENT_USER`; `HKEY_LOCAL_MACHINE`
-//! is exported only because the installed-fonts list lives there and is read.
-//!
-//! Two things here that the Win32 API makes easy to get wrong:
-//!
-//! * **Sizes are bytes, lengths are `u16`s.** Every `len()` handed to the API is
-//!   multiplied by two, and every size read back is divided by two. `RegEnumValueW`
-//!   is the exception that proves it: its length is already in characters.
-//! * **`None` means the default value.** A key's unnamed `(Default)` value is
-//!   addressed with a null name pointer, not an empty string. AutoPlay stores
-//!   its choice there, so this is not an edge case for us.
+//! Two Win32 conventions: sizes are **bytes** while lengths are `u16` counts
+//! (`RegEnumValueW` is the exception), and a `None` name addresses a key's
+//! unnamed `(Default)` value with a null pointer.
+
+// ########## THE REGISTRY ##########
 
 #![cfg(windows)]
 
 use std::ptr;
+
+use common::utf16::wide;
 
 use windows_sys::Win32::Foundation::{ERROR_MORE_DATA, ERROR_SUCCESS};
 use windows_sys::Win32::System::Registry::{
@@ -52,10 +42,6 @@ impl Drop for Key {
             unsafe { RegCloseKey(self.0) };
         }
     }
-}
-
-pub fn wide(text: &str) -> Vec<u16> {
-    text.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
 /// Opens an existing key. `None` when it isn't there or isn't ours to open,
@@ -93,7 +79,7 @@ pub fn create(root: HKEY, path: &str) -> Result<Key, String> {
 }
 
 /// Writes a string value. `name` of `None` writes the key's `(Default)` value.
-pub fn set_sz(key: &Key, name: Option<&str>, value: &str) -> Result<(), String> {
+pub fn setSz(key: &Key, name: Option<&str>, value: &str) -> Result<(), String> {
     let label = name.unwrap_or("(Default)").to_owned();
     let name = name.map(wide);
     let value = wide(value);
@@ -123,7 +109,7 @@ pub fn set_sz(key: &Key, name: Option<&str>, value: &str) -> Result<(), String> 
 /// `None` for a value that isn't there, isn't a string, or is longer than a
 /// registry value has any business being — all of which mean "not something we
 /// wrote" to every caller.
-pub fn query_sz(key: &Key, name: Option<&str>) -> Option<String> {
+pub fn querySz(key: &Key, name: Option<&str>) -> Option<String> {
     let name = name.map(wide);
     let mut buffer = [0u16; 1024];
     let mut size = (buffer.len() * 2) as u32;
@@ -150,17 +136,14 @@ pub fn query_sz(key: &Key, name: Option<&str>) -> Option<String> {
     Some(String::from_utf16_lossy(&buffer[..end]))
 }
 
-/// Every value name under a key, in the order the hive hands them over.
+/// Every value name under `key`, in the order the hive hands them over.
 ///
-/// Only [`crate::font`] needs this, and only because the font list names its
-/// values after the faces inside the file rather than after the file: a `.ttc`
-/// holding three faces is one value called `"Yu Gothic UI Regular & Yu Gothic UI
-/// Semilight & Yu Gothic UI Light (TrueType)"`. There is no name to ask for, so
-/// the whole list gets read and searched.
-///
-/// A value whose name doesn't fit the buffer is skipped rather than truncated —
-/// a truncated name would match the wrong font, which is worse than missing one.
-pub fn enum_value_names(key: &Key) -> Vec<String> {
+/// Only `crate::font` needs this, because the font list names its values after
+/// the *faces* inside a file rather than after the file — a `.ttc` holding
+/// three is one value named after all three — so there is no name to ask for.
+/// A name too long for the buffer is skipped rather than truncated, since a
+/// truncated one would match the wrong font.
+pub fn enumValueNames(key: &Key) -> Vec<String> {
     let mut names = Vec::new();
     let mut buffer = [0u16; 512];
 
@@ -195,16 +178,16 @@ pub fn enum_value_names(key: &Key) -> Vec<String> {
 
 /// Removes a value. A value that was already absent is the desired end state,
 /// so nothing is reported either way.
-pub fn delete_value(key: &Key, name: Option<&str>) {
+pub fn deleteValue(key: &Key, name: Option<&str>) {
     let name = name.map(wide);
     unsafe {
         RegDeleteValueW(key.0, name.as_ref().map_or(ptr::null(), |n| n.as_ptr()));
     }
 }
 
-/// Removes a key that has no subkeys. Used to take our own backup key away
-/// again once its contents have been put back where they came from.
-pub fn delete_key(root: HKEY, path: &str) {
+/// Removes a key that has no subkeys. Called on the AutoPlay backup key once
+/// its contents have been restored.
+pub fn deleteKey(root: HKEY, path: &str) {
     unsafe {
         RegDeleteKeyW(root, wide(path).as_ptr());
     }

@@ -4,33 +4,11 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! Every test in this crate, one submodule per source module.
-//!
-//! Deliberately narrow. The listener has no UI at all, and the parts of it you
-//! can watch work — the log, the settings paths, the drive-letter bookkeeping
-//! in the Windows trigger — are not tested here. What survives is the decision
-//! chain that runs against whatever a stranger just plugged in: is this
-//! launcher signed by a key we trust, for the job we are about to give it
-//! ([`trust`]), do we therefore start it ([`volume`]), and can we read the
-//! version its signature states ([`version`]).
-//!
-//! Kept inside the crate rather than in `tests/` because the listener is a
-//! binary with no library target. It also keeps `Log::silent` behind
-//! `#[cfg(test)]`, so no production path can construct a log that discards
-//! everything.
-//!
-//! Run with `cargo test -p listener`.
-//!
-//! # Before running these
-//!
-//! [`trust`] asserts against the anchors `build.rs` generated from `keys/*.pub`.
-//! A fresh clone has no `keys/`, so run `cargo run -p xtask -- keygen` first —
-//! without it the crate does not compile at all, let alone test.
-//!
-//! The cross-crate signature cases — a genuine launcher accepted, a genuine
-//! *installer* refused, a comment edited after signing — live in `trust`'s own
-//! suite, where a keypair can be generated and used to sign. What is tested here
-//! is the part that is about a volume rather than about a signature.
+//! Every test in this crate, one submodule per source module. Run with
+//! `cargo test -p listener`; a fresh clone needs
+//! `cargo run -p xtask -- keygen` first or the crate will not compile.
+
+// ########## LISTENER TESTS ##########
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -72,13 +50,13 @@ impl Drop for Scratch {
 
 mod trust {
     use super::Scratch;
-    use crate::trust::{ANCHORS, LAUNCHER_NAME, Refusal, verify_launcher};
+    use crate::trust::{ANCHORS, LAUNCHER_NAME, Refusal, verifyLauncher};
     use std::fs;
 
     /// Shorthand for "refused for this signature reason".
-    fn refused_because(dir: &Scratch, expected: ::trust::Refusal) -> bool {
+    fn refusedBecause(dir: &Scratch, expected: ::trust::Refusal) -> bool {
         matches!(
-            verify_launcher(dir.path()),
+            verifyLauncher(dir.path()),
             Err(Refusal::Signature(actual)) if actual == expected
         )
     }
@@ -89,7 +67,7 @@ mod trust {
     fn a_volume_with_no_launcher_is_not_a_cartridge() {
         let dir = Scratch::new("trust-empty");
         assert!(matches!(
-            verify_launcher(dir.path()),
+            verifyLauncher(dir.path()),
             Err(Refusal::NoLauncher)
         ));
     }
@@ -98,10 +76,10 @@ mod trust {
     fn an_unsigned_launcher_is_refused() {
         let dir = Scratch::new("trust-unsigned");
         fs::write(dir.join(LAUNCHER_NAME), b"MZ but nobody signed it").expect("write");
-        assert!(refused_because(&dir, ::trust::Refusal::Unsigned));
+        assert!(refusedBecause(&dir, ::trust::Refusal::Unsigned));
     }
 
-    /// The handle `verify_launcher` holds has to deny writers without denying
+    /// The handle `verifyLauncher` holds has to deny writers without denying
     /// readers — the image loader needs one to start the process, so a lock that
     /// excluded everything would make every genuine cartridge fail to launch.
     /// Verified on a file we control, since the signed path cannot be reached
@@ -120,7 +98,7 @@ mod trust {
             .read(true)
             .share_mode(FILE_SHARE_READ)
             .open(&path)
-            .expect("open with the same share mode verify_launcher uses");
+            .expect("open with the same share mode verifyLauncher uses");
 
         assert!(fs::read(&path).is_ok(), "a reader must still get in");
         assert!(
@@ -148,7 +126,7 @@ mod trust {
 
         // Either it fails to decode or it fails to verify; both are refusals and
         // neither launches anything. What must never happen is Ok.
-        assert!(verify_launcher(dir.path()).is_err());
+        assert!(verifyLauncher(dir.path()).is_err());
     }
 
     #[test]
@@ -159,7 +137,7 @@ mod trust {
         assert!(!ANCHORS.is_empty(), "build.rs produced no trust anchors");
         for anchor in ANCHORS {
             assert!(
-                anchor.is_usable(),
+                anchor.isUsable(),
                 "keys/{}.pub is not a usable minisign public key",
                 anchor.name
             );
@@ -225,11 +203,11 @@ mod volume {
     use super::Scratch;
     use crate::log::Log;
     use crate::trust;
-    use crate::volume::{Outcome, handle_volume};
+    use crate::volume::{Outcome, handleVolume};
     use std::fs;
 
     /// Builds a fake volume in a temp folder.
-    fn fake_volume(name: &str, launcher: Option<&[u8]>) -> Scratch {
+    fn fakeVolume(name: &str, launcher: Option<&[u8]>) -> Scratch {
         let dir = Scratch::new(&format!("volume-{name}"));
         if let Some(bytes) = launcher {
             fs::write(dir.join(trust::LAUNCHER_NAME), bytes).expect("write launcher");
@@ -239,16 +217,16 @@ mod volume {
 
     #[test]
     fn a_volume_with_no_launcher_is_ignored() {
-        let dir = fake_volume("plain", None);
-        assert_eq!(handle_volume(dir.path(), &Log::silent()), Outcome::Ignored);
+        let dir = fakeVolume("plain", None);
+        assert_eq!(handleVolume(dir.path(), &Log::silent()), Outcome::Ignored);
     }
 
     #[test]
     fn an_unsigned_launcher_is_never_started() {
         // The whole point of the change: a binary sitting at a volume root with
         // the right *name* gets nowhere without the right signature.
-        let dir = fake_volume("unsigned", Some(b"MZ nobody signed this"));
-        assert_eq!(handle_volume(dir.path(), &Log::silent()), Outcome::Ignored);
+        let dir = fakeVolume("unsigned", Some(b"MZ nobody signed this"));
+        assert_eq!(handleVolume(dir.path(), &Log::silent()), Outcome::Ignored);
     }
 
     #[test]
@@ -258,7 +236,7 @@ mod volume {
                          trusted comment: romzeta-launcher 0.2.0\n\
                          AAAA==\n";
         let signed = sigblock::attach(b"MZ signed by someone else", signature);
-        let dir = fake_volume("stranger", Some(&signed));
-        assert_eq!(handle_volume(dir.path(), &Log::silent()), Outcome::Ignored);
+        let dir = fakeVolume("stranger", Some(&signed));
+        assert_eq!(handleVolume(dir.path(), &Log::silent()), Outcome::Ignored);
     }
 }

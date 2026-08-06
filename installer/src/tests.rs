@@ -4,39 +4,11 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! Every test in this crate, one submodule per source module.
-//!
-//! Deliberately narrow. The installer is a wizard, and anything you can confirm
-//! by clicking through it — the screens, the scan, the copy, the registry
-//! writes, the folder layout — is not tested here. What survives is the four
-//! things a person cannot check by looking:
-//!
-//! - [`volume`] — that the drive Windows is on is never offered. Edit mode
-//!   *deletes folders* from whichever volume you pick, so this is the one
-//!   mistake that costs more than a retry.
-//! - [`catalog`] — that a catalog entry cannot name a path outside the
-//!   cartridge, and that a game's name cannot become one either.
-//! - [`image`] — header parsing of whatever file a user picked as a cover. This
-//!   is arbitrary bytes going through a hand-rolled parser.
-//! - [`version`] — that `--version` still prints the shape the listener parses.
-//! - [`font`] — that the wizard is drawing in the *system's* font. Both it and
-//!   the fallback are legible sans-serifs, so a lookup that quietly failed looks
-//!   exactly like one that worked.
-//! - [`payload`] — that the two programs survive being packed and unpacked with
-//!   their signatures intact. A launcher that lost a byte writes a cartridge that
-//!   looks right and works nowhere.
-//!
-//! Run with `cargo test -p installer`. The installer is not in the workspace's
-//! `default-members`, so a bare `cargo test` skips it entirely — use
-//! `cargo test --workspace`.
-//!
-//! # One thing to know before running these
-//!
-//! [`volume`]'s two tests enumerate the machine's real drives and assert against
-//! `%SystemRoot%`. They are deliberately not `#[ignore]`d: behind `--ignored`
-//! they would simply never run again, and the behaviour they guard is the most
-//! destructive thing this program could get wrong. Nothing here writes to the
-//! registry or the filesystem.
+//! Every test in this crate, one submodule per source module. Run with
+//! `cargo test -p installer` — this crate is not in the workspace's
+//! `default-members`, so a bare `cargo test` skips it.
+
+// ########## INSTALLER TESTS ##########
 
 mod payload {
     use crate::payload::{LAUNCHER_BYTES, LISTENER_BYTES, launcher, listener};
@@ -62,7 +34,7 @@ mod payload {
                 "{name} unpacked to the wrong size"
             );
             assert!(
-                sigblock::is_signed(&bytes),
+                sigblock::isSigned(&bytes),
                 "{name} came out of the payload without its signature — every cartridge \
                  this installer writes would be ignored by every listener"
             );
@@ -125,7 +97,7 @@ mod font {
 }
 
 mod catalog {
-    use crate::catalog::{Entry, game_dir, image_file, image_path, slug};
+    use crate::catalog::{Entry, gameDir, imageFile, imagePath, slug};
     use std::path::Path;
 
     #[test]
@@ -134,13 +106,13 @@ mod catalog {
         // launcher asks its app:// protocol for, so the prefix is a contract
         // between the two crates rather than a detail of this one.
         assert_eq!(
-            image_path("bg3", Path::new(r"C:\art\cover.png")),
+            imagePath("bg3", Path::new(r"C:\art\cover.png")),
             "assets/images/bg3.png"
         );
         // The source extension is kept: the webview goes by content, not name,
         // and renaming a jpg to png only makes the cartridge harder to read.
         assert_eq!(
-            image_path("celeste", Path::new(r"C:\art\cover.JPG")),
+            imagePath("celeste", Path::new(r"C:\art\cover.JPG")),
             "assets/images/celeste.jpg"
         );
     }
@@ -158,7 +130,7 @@ mod catalog {
             image: "images/bg3.png".into(),
         };
         assert_eq!(
-            image_file(root, &legacy),
+            imageFile(root, &legacy),
             Some(root.join("images").join("bg3.png"))
         );
 
@@ -167,7 +139,7 @@ mod catalog {
             ..legacy
         };
         assert_eq!(
-            image_file(root, &current),
+            imageFile(root, &current),
             Some(root.join("assets").join("images").join("bg3.png"))
         );
     }
@@ -191,17 +163,17 @@ mod catalog {
             exe: "../../Windows/System32/cmd.exe".into(),
             image: "../../Windows/x.png".into(),
         };
-        assert_eq!(game_dir(root, &escape), None);
-        assert_eq!(image_file(root, &escape), None);
+        assert_eq!(gameDir(root, &escape), None);
+        assert_eq!(imageFile(root, &escape), None);
 
         let ok = Entry {
             name: "bg3".into(),
             exe: "games/bg3/bin/bg3.exe".into(),
             image: "images/bg3.png".into(),
         };
-        assert_eq!(game_dir(root, &ok), Some(root.join("games").join("bg3")));
+        assert_eq!(gameDir(root, &ok), Some(root.join("games").join("bg3")));
         assert_eq!(
-            image_file(root, &ok),
+            imageFile(root, &ok),
             Some(root.join("images").join("bg3.png"))
         );
 
@@ -211,14 +183,14 @@ mod catalog {
             exe: "games/loose.exe".into(),
             image: "images/loose.png".into(),
         };
-        assert_eq!(game_dir(root, &shallow), None);
+        assert_eq!(gameDir(root, &shallow), None);
     }
 }
 
 mod image {
     use crate::image::parse;
 
-    fn png_header(width: u32, height: u32) -> Vec<u8> {
+    fn pngHeader(width: u32, height: u32) -> Vec<u8> {
         let mut bytes = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
         bytes.extend_from_slice(&13u32.to_be_bytes());
         bytes.extend_from_slice(b"IHDR");
@@ -239,7 +211,7 @@ mod image {
 
     #[test]
     fn reads_a_png() {
-        assert_eq!(parse(&png_header(600, 900)), Some((600, 900)));
+        assert_eq!(parse(&pngHeader(600, 900)), Some((600, 900)));
     }
 
     #[test]
@@ -329,7 +301,7 @@ mod volume {
         assert!(!ANCHORS.is_empty(), "build.rs produced no trust anchors");
         for anchor in ANCHORS {
             assert!(
-                anchor.is_usable(),
+                anchor.isUsable(),
                 "keys/{}.pub is not a usable minisign public key",
                 anchor.name
             );
@@ -343,7 +315,7 @@ mod volume {
     /// rather than "close enough".
     #[test]
     fn only_a_verified_signature_makes_a_cartridge() {
-        use crate::volume::attested_launcher;
+        use crate::volume::attestedLauncher;
 
         let dir =
             std::env::temp_dir().join(format!("romzeta-installer-attest-{}", std::process::id()));
@@ -351,12 +323,12 @@ mod volume {
         std::fs::create_dir_all(&dir).expect("temp dir");
 
         // No file at all.
-        assert_eq!(attested_launcher(&dir), None);
+        assert_eq!(attestedLauncher(&dir), None);
 
         // A file with the right name and nothing else — what running it used to
         // accept.
         std::fs::write(dir.join(crate::cartridge::LAUNCHER_NAME), b"MZ not signed").expect("write");
-        assert_eq!(attested_launcher(&dir), None);
+        assert_eq!(attestedLauncher(&dir), None);
 
         // A well-formed signature block from a key this build does not carry.
         let signature = "untrusted comment: signature from a key we do not have\n\
@@ -365,7 +337,7 @@ mod volume {
                          AAAA==\n";
         let signed = sigblock::attach(b"MZ signed by someone else", signature);
         std::fs::write(dir.join(crate::cartridge::LAUNCHER_NAME), signed).expect("write");
-        assert_eq!(attested_launcher(&dir), None);
+        assert_eq!(attestedLauncher(&dir), None);
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -373,23 +345,23 @@ mod volume {
     #[cfg(windows)]
     #[test]
     fn the_drive_windows_is_on_is_refused() {
-        use crate::volume::{Eligibility, drive_letter, is_system_drive, list};
+        use crate::volume::{Eligibility, driveLetter, isSystemDrive, list};
         use std::path::Path;
 
         // The most important behaviour in this module, asserted against the
         // machine running the test rather than a fixture.
         let system = std::env::var_os("SystemRoot").expect("Windows sets SystemRoot");
-        let letter = drive_letter(Path::new(&system)).expect("a drive letter");
+        let letter = driveLetter(Path::new(&system)).expect("a drive letter");
 
-        assert!(is_system_drive(Path::new(&format!("{letter}:\\"))));
-        assert!(is_system_drive(Path::new(&format!(
+        assert!(isSystemDrive(Path::new(&format!("{letter}:\\"))));
+        assert!(isSystemDrive(Path::new(&format!(
             "{}:\\",
             letter.to_ascii_lowercase()
         ))));
-        assert!(is_system_drive(Path::new(&format!("{letter}:\\games"))));
+        assert!(isSystemDrive(Path::new(&format!("{letter}:\\games"))));
 
         for volume in list() {
-            if drive_letter(&volume.root) == Some(letter) {
+            if driveLetter(&volume.root) == Some(letter) {
                 assert_eq!(
                     volume.eligibility,
                     Eligibility::SystemDrive,
@@ -404,12 +376,12 @@ mod volume {
     #[cfg(windows)]
     #[test]
     fn nothing_internal_is_ever_allowed() {
-        use crate::volume::{is_system_drive, list};
+        use crate::volume::{isSystemDrive, list};
 
         for volume in list() {
             if volume.allowed() {
                 assert!(
-                    !is_system_drive(&volume.root),
+                    !isSystemDrive(&volume.root),
                     "{} is the system drive",
                     volume.root.display()
                 );

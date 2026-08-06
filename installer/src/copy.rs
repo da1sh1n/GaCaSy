@@ -4,17 +4,10 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! Moving a game folder onto a cartridge: chunked, measured, and interruptible.
-//!
-//! Game installs run to many gigabytes, so this is the one operation in the
-//! installer with a real duration. Two consequences shape it:
-//!
-//! * It runs on a worker thread and reports bytes back as it goes, so the UI
-//!   stays responsive and the progress bar means something.
-//! * It copies in chunks rather than calling `fs::copy`, because `fs::copy` on a
-//!   40 GB pak file is one uninterruptible call — cancel would appear to do
-//!   nothing for several minutes. The chunk loop is slightly slower than the
-//!   OS-level copy and buys a cancel that responds within one chunk.
+//! Copies files and directories in chunks, reporting bytes copied and checking
+//! a cancel flag between chunks.
+
+// ########## THE CANCELLABLE COPY ##########
 
 use std::fs::{self, File};
 use std::io::{self, Read, Write};

@@ -4,27 +4,14 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! The shared core: everything that happens once a volume shows up.
-//!
-//! This is steps 2–5 of `../structure.md` ("Responsibilities / flow") in full,
-//! and it is **the** place they exist. Both triggers — the resident Windows
-//! message pump and the one-shot Linux udev handoff — call [`handle_volume`]
-//! and do nothing else with signatures or launching. A trust check
-//! reimplemented per platform is exactly the bug the split is meant to prevent.
-//!
-//! The order below is the security property, not a style choice:
+//! Handles one volume: verify its launcher, compare project versions, start it.
+//! Logs the reason on every path out.
 //!
 //! ```text
 //! read the bytes -> verify the signature -> ask the signature what it is -> run it
 //! ```
-//!
-//! Nothing is executed at any point before the last step. The version used to
-//! come from running the launcher with `--version` and believing it, which was
-//! defensible only because it happened after verification — but it meant the
-//! file was opened, executed and read three separate times to answer two
-//! questions. minisign signs a comment alongside the payload, `xtask` writes the
-//! version into it, and [`crate::trust`] hands it back already authenticated, so
-//! the probe bought nothing that the signature was not already carrying.
+
+// ########## HANDLING ONE VOLUME ##########
 
 use std::path::Path;
 use std::process::Command;
@@ -45,30 +32,28 @@ pub enum Outcome {
 }
 
 /// Verifies the volume at `root` and, if it carries a launcher this listener
-/// trusts, starts it.
+/// trusts and can work with, starts it. Returns what happened.
 ///
-/// Every path out of here logs its reason first — with no console and (on
-/// Windows) no window, the log is the only way to answer "why didn't it
-/// start?".
-pub fn handle_volume(root: &Path, log: &Log) -> Outcome {
-    let launcher = match trust::verify_launcher(root) {
+/// Every path out logs its reason first — with no console and, on Windows, no
+/// window, the log is the only way to answer "why didn't it start?".
+pub fn handleVolume(root: &Path, log: &Log) -> Outcome {
+    let launcher = match trust::verifyLauncher(root) {
         Ok(launcher) => launcher,
         Err(reason) => {
-            // Refusals share one line shape because they share one meaning:
-            // this volume is left alone. `no launcher at the volume root` is by
-            // far the most common and is not a problem — it is every ordinary
-            // drive anyone ever plugs in — but it is logged at the same level as
-            // the rest, because when a cartridge *isn't* being detected, "we
-            // looked at E:\ and found nothing" is the line that proves the
-            // trigger fired at all.
+            // Every refusal shares one line shape because they share one
+            // meaning. "no launcher at the volume root" is by far the most
+            // common and is not a problem, but it is logged all the same: when
+            // a cartridge *isn't* being detected, "we looked at E:\ and found
+            // nothing" is the line that proves the trigger fired at all.
             log.line(&format!("{} ignored: {reason}", root.display()));
             return Outcome::Ignored;
         }
     };
 
-    // Straight out of the verified signature — see version.rs.
+    // Straight out of the verified signature — nothing was executed to get it.
     let ours = version::own();
     match version::parse(&launcher.version) {
+        // Majors differ: both are genuine, and they cannot work together.
         Some(theirs) if theirs.major != ours.major => {
             log.line(&format!(
                 "{} ignored: launcher is project version {} and this listener is {} \
@@ -101,10 +86,10 @@ pub fn handle_volume(root: &Path, log: &Log) -> Outcome {
         }
         None => {
             // Deliberately not fatal. The signature already proved this is our
-            // binary; refusing to start a genuine launcher over a comment we
-            // cannot parse would turn a cosmetic fault into a dead cartridge.
-            // A definite mismatch above is a different matter — that is the
-            // signature clearly stating something we cannot work with.
+            // binary, and refusing a genuine launcher over a comment we cannot
+            // parse would turn a cosmetic fault into a dead cartridge. A
+            // definite mismatch above is different: that is the signature
+            // clearly stating something we cannot work with.
             log.line(&format!(
                 "{} launcher's signature carries no usable version ({:?}); starting it anyway",
                 root.display(),
@@ -116,7 +101,7 @@ pub fn handle_volume(root: &Path, log: &Log) -> Outcome {
     // Spawned, never waited on: the Windows build has to get straight back to
     // its message loop, and the Linux build has to exit and leave the launcher
     // running. `current_dir` is the volume root because the launcher resolves
-    // all its content (catalog.json, images/, games/) relative to itself.
+    // its content (catalog.json, images/, games/) relative to where it runs.
     match Command::new(&launcher.path).current_dir(root).spawn() {
         Ok(child) => {
             log.line(&format!(

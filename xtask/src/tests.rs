@@ -4,15 +4,11 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! Every test in this crate, one submodule per source module.
-//!
-//! Run with `cargo test -p xtask`. Note that xtask is not in the workspace's
-//! `default-members`, so a bare `cargo test` skips it — use
-//! `cargo test --workspace`.
-//!
-//! [`manifest::this_workspace_agrees_with_itself`] asserts against the real
-//! manifests in this repo, so bumping one crate's major without the others
-//! fails here rather than at release time.
+//! Every test in this crate, one submodule per source module. Run with
+//! `cargo test -p xtask` — this crate is not in the workspace's
+//! `default-members`, so a bare `cargo test` skips it.
+
+// ########## XTASK TESTS ##########
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -54,7 +50,7 @@ impl Drop for Scratch {
 
 mod keys {
     use super::Scratch;
-    use crate::keys::{base64_line, dotenv, keygen, refuse_inside_repo, secret_key};
+    use crate::keys::{base64Line, dotenv, keygen, refuseInsideRepo, secretKey};
     use std::collections::HashMap;
     use std::fs;
     use std::path::Path;
@@ -62,21 +58,21 @@ mod keys {
     #[test]
     fn reads_the_key_out_of_a_pub_file() {
         let text = "untrusted comment: minisign public key A1B2\nRWQf6LRCGA9i53==\n";
-        assert_eq!(base64_line(text), Some("RWQf6LRCGA9i53==".to_string()));
+        assert_eq!(base64Line(text), Some("RWQf6LRCGA9i53==".to_string()));
     }
 
     #[test]
     fn survives_a_pub_file_someone_edited() {
         // No comment line at all, and trailing blank lines.
         assert_eq!(
-            base64_line("RWQf6LRCGA9i53==\n\n"),
+            base64Line("RWQf6LRCGA9i53==\n\n"),
             Some("RWQf6LRCGA9i53==".to_string())
         );
-        assert_eq!(base64_line("untrusted comment: only a comment\n"), None);
-        assert_eq!(base64_line(""), None);
+        assert_eq!(base64Line("untrusted comment: only a comment\n"), None);
+        assert_eq!(base64Line(""), None);
     }
 
-    fn env_from(text: &str) -> HashMap<String, String> {
+    fn envFrom(text: &str) -> HashMap<String, String> {
         let dir = Scratch::new("xtask-dotenv");
         fs::write(dir.join(".env"), text).expect("write .env");
         dotenv(dir.path())
@@ -84,7 +80,7 @@ mod keys {
 
     #[test]
     fn parses_the_env_shapes_that_actually_occur() {
-        let env = env_from(
+        let env = envFrom(
             "# a comment\n\
              \n\
              ROMZETA_SIGNING_KEY=C:\\keys\\romzeta.key\n\
@@ -103,8 +99,8 @@ mod keys {
     }
 
     /// A fake repo root whose `.env` points the signing key somewhere outside
-    /// it, which is the arrangement `secret_key` and `keygen` both expect.
-    fn rooted_at(case: &str, key: &Path, extra: &str) -> Scratch {
+    /// it, which is the arrangement `secretKey` and `keygen` both expect.
+    fn rootedAt(case: &str, key: &Path, extra: &str) -> Scratch {
         let root = Scratch::new(&format!("xtask-{case}"));
         fs::write(
             root.join(".env"),
@@ -126,8 +122,8 @@ mod keys {
         let pair = minisign::KeyPair::generate_unencrypted_keypair().expect("keypair");
         fs::write(&key_path, pair.sk.to_box(None).expect("box").to_string()).expect("write key");
 
-        let root = rooted_at("plainkey-root", &key_path, "");
-        let loaded = secret_key(root.path()).unwrap_or_else(|e| panic!("{e}"));
+        let root = rootedAt("plainkey-root", &key_path, "");
+        let loaded = secretKey(root.path()).unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(loaded, pair.sk);
     }
 
@@ -139,7 +135,7 @@ mod keys {
         let dir = Scratch::new("xtask-encryptedkey");
         let key_path = dir.join("romzeta.key");
 
-        let root = rooted_at(
+        let root = rootedAt(
             "encryptedkey-root",
             &key_path,
             "ROMZETA_SIGNING_PASSWORD=correct-horse-battery-staple\n",
@@ -152,7 +148,7 @@ mod keys {
             "the password was written into the key file:\n{written}"
         );
         // And it still round-trips, using that password from the same `.env`.
-        assert!(secret_key(root.path()).is_ok());
+        assert!(secretKey(root.path()).is_ok());
     }
 
     #[test]
@@ -163,11 +159,11 @@ mod keys {
         fs::create_dir_all(root.join("keys")).expect("temp repo");
 
         let inside = root.join("keys").join("romzeta.key");
-        assert!(refuse_inside_repo(root.path(), &inside).is_err());
+        assert!(refuseInsideRepo(root.path(), &inside).is_err());
 
         let elsewhere = Scratch::new("xtask-elsewhere");
         let outside = elsewhere.join("romzeta.key");
-        assert!(refuse_inside_repo(root.path(), &outside).is_ok());
+        assert!(refuseInsideRepo(root.path(), &outside).is_ok());
     }
 }
 
@@ -175,7 +171,7 @@ mod manifest {
     use crate::manifest::{check, major, read};
     use std::path::Path;
 
-    fn repo_root() -> &'static Path {
+    fn repoRoot() -> &'static Path {
         // xtask/ -> the workspace root.
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
@@ -187,14 +183,21 @@ mod manifest {
         // The whole point, asserted against the real manifests: if someone bumps
         // one crate's major and not the others, this fails in `cargo test`
         // rather than at release time.
-        check(repo_root()).unwrap_or_else(|e| panic!("{e}"));
+        check(repoRoot()).unwrap_or_else(|e| panic!("{e}"));
     }
 
     #[test]
     fn every_crate_is_accounted_for() {
-        let (_, crates) = read(repo_root()).expect("read the manifests");
+        let (_, crates) = read(repoRoot()).expect("read the manifests");
         let names: Vec<_> = crates.iter().map(|c| c.name.as_str()).collect();
-        for expected in ["launcher", "listener", "installer", "sigblock", "xtask"] {
+        for expected in [
+            "launcher",
+            "listener",
+            "installer",
+            "common",
+            "sigblock",
+            "xtask",
+        ] {
             assert!(names.contains(&expected), "{expected} is not a member");
         }
     }
@@ -211,7 +214,7 @@ mod manifest {
 
 mod sign {
     use super::Scratch;
-    use crate::keys::{Anchor, base64_line};
+    use crate::keys::{Anchor, base64Line};
     use crate::sign::{sign, verify};
     use std::fs;
 
@@ -224,7 +227,7 @@ mod sign {
         let pair = minisign::KeyPair::generate_unencrypted_keypair().expect("keypair");
         let anchors = vec![Anchor {
             name: "dev",
-            base64: base64_line(&pair.pk.to_box().expect("pk").to_string()).expect("base64 line"),
+            base64: base64Line(&pair.pk.to_box().expect("pk").to_string()).expect("base64 line"),
         }];
         let key = pair.sk;
 
@@ -267,7 +270,7 @@ mod sign {
         let theirs = minisign::KeyPair::generate_unencrypted_keypair().expect("keypair");
         let anchors = vec![Anchor {
             name: "romzeta",
-            base64: base64_line(&ours.pk.to_box().expect("pk").to_string()).expect("base64 line"),
+            base64: base64Line(&ours.pk.to_box().expect("pk").to_string()).expect("base64 line"),
         }];
 
         let exe = dir.join("theirs.exe");

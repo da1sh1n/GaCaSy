@@ -4,68 +4,17 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-// Cartridge launcher shell.
+// Entry point. Answers `--version` / `--signature`, resolves the content folder
+// and seeds it, takes the single-instance lock when deployed, then hands off to
+// `ui::run`.
 //
-// The whole UI (HTML/CSS/JS) is baked into this exe with rust-embed and
-// served over an `app://` custom protocol straight out of memory — there
-// is no bundled web server and nothing ever listens on a port.
-//
-// Everything the exe reads from disk is cartridge *content* that lives
-// beside it in `output/`:
-//
-//   output/
-//     launcher.exe   <- this program
-//     config.toml    <- seeded from the baked-in default if missing
-//     catalog.json   <- the game list (name / exe / image), seeded likewise
-//     images/        <- 600x900 cover art, dropped in by hand
-//     games/         <- the actual game installs
-//     logs/          <- launch history + each game's stdout/stderr (see log.rs)
-//     EBWebView/     <- WebView2's own data folder (its only on-disk crumbs)
-//
-// `cargo run` builds into target/ and runs in place, resolving `output/`
-// as its content directory and refreshing `output/launcher.exe` so the
-// shippable copy stays current. It does not relaunch itself, so there is
-// exactly one launcher process (WebView2 still spawns its own renderer
-// process — that is inherent to the engine and cannot be merged away).
-//
-// The source is split by job, and this file is only the front door:
-//
-//   constants.rs  every tunable number in the crate, in one place
-//   content.rs    which folder holds the content, and seeding it on first run
-//   config.rs     reading config.toml, key by key, with defaults under it
-//   catalog.rs    the game list, and marking which games are actually present
-//   assets.rs     the `app://` protocol: the embedded UI and disk content
-//   window.rs     how big the window is and where it sits
-//   ui.rs         the window + webview, the IPC, and the event loop
-//   launch.rs     starting a game and deciding whether it came up
-//   log.rs        logs/launcher.log and each game's own output
-//   order.rs      what order the covers are shown in, and repairing a bad one
-//   instance.rs   the single-instance mutex
-//   version.rs    --version / --signature, answered before anything else
-//   index.html    the UI's markup, served over app://
-//   style.css     its look, same
-//   app.js        its behaviour, same
-//
-// This exe carries its own minisign signature, appended past the end of the
-// image (see the sigblock crate). That signature is the cartridge's whole
-// identity: the listener reads it off the disk and refuses to start a launcher
-// it cannot verify. The launcher itself does nothing to earn that beyond being
-// the signed binary — it holds no secret and checks nothing.
-//
-//   launcher.exe --version     print x.y.z and exit
-//   launcher.exe --signature   print this exe's signature and exit
-//
-// Window sizing (see `constants`): a cover aims for a fraction of the screen
-// width and the window wraps a row of them plus the toolbar and margins. How
-// many games there are sets how *wide* the window is — never how big a cover is
-// — between a floor of three covers and whatever the screen's width cap allows;
-// past that the row scrolls sideways. Rust picks the window size and the page's
-// own layout() in src/app.js fits the covers into it; the shared border/image
-// gap numbers (from config.toml, mirrored as PAD/GAP in the page) keep the two
-// in step.
-//
-// No console window: this is a GUI app, not a CLI tool.
+// No console window: this is a GUI app.
 #![windows_subsystem = "windows"]
+// Functions are camelCase in this project while variables stay snake_case,
+// which rustc's default lints object to. Silenced once, at the crate root.
+#![allow(non_snake_case)]
+
+// ########## ENTRY POINT ##########
 
 mod assets;
 mod catalog;
@@ -92,8 +41,8 @@ fn main() -> wry::Result<()> {
         return Ok(());
     }
 
-    let base_dir = content::resolve_base_dir();
-    content::ensure_layout(&base_dir);
+    let base_dir = content::resolveBaseDir();
+    content::ensureLayout(&base_dir);
 
     // Single-instance is enforced only for the shipped launcher (the exe in
     // output/). Under `cargo run` it is deliberately skipped so a rebuild
@@ -101,7 +50,7 @@ fn main() -> wry::Result<()> {
     // run is still on screen holding the lock — the classic "my change did
     // nothing" trap during development. Nothing listens on a port: the guard
     // is a named mutex the OS releases when the process dies.
-    let _instance = if content::running_deployed() {
+    let _instance = if content::runningDeployed() {
         match instance::acquire() {
             Some(guard) => Some(guard),
             None => return Ok(()),

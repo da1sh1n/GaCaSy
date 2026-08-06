@@ -5,6 +5,10 @@ edition = "2024"
 license = "GPL-3.0-or-later"
 
 [dependencies]
+# The x.y.z parser and UTF-16 conversion for the Win32 calls, shared with the
+# launcher and the listener so all three agree on both.
+common = { path = "../common" }
+
 # egui, not a webview. The launcher can assume WebView2 because a cartridge is
 # plugged into a PC that already has it; the installer cannot, and with no
 # internet it would have no way to bootstrap the runtime it found missing. This

@@ -13,6 +13,10 @@ publish = false
 # Where the signature goes. The one thing xtask shares with the programs.
 sigblock = { path = "../sigblock" }
 
+# The UTC date that goes into a signature's trusted comment, shared with the
+# programs' log timestamps so there is one calendar implementation in the tree.
+common = { path = "../common" }
+
 # Signing. The reference Rust implementation, by minisign's author, so what we
 # produce is a real .minisig and not a lookalike.
 minisign = "0.9.1"

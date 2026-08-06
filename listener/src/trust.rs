@@ -4,46 +4,11 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! What makes a volume a cartridge: a `launcher.exe` at its root carrying a
-//! signature from a key this listener was built to trust, for the job of being
-//! a launcher.
-//!
-//! That is the whole definition. There is no marker file, no key to copy off the
-//! disk, and nothing on the PC to edit — the previous scheme had all three, and
-//! its own docs called it a recognition handshake rather than a security
-//! boundary, because anyone who could read a cartridge could clone its secret.
-//!
-//! The decision itself lives in [`trust`], shared with the installer. What is
-//! here is the part that is about a *volume*: which file to look at, holding it
-//! still, and saying why not in a way the log can be read back from.
-//!
-//! This is a check on `launcher.exe` alone. `catalog.json`, `config.toml` and
-//! everything under `games/` and `images/` sit on the same disk unsigned, and
-//! nothing here vouches for them — see `SIGNING.md`, §1, and
-//! `crate::volume`'s module doc for what starting the launcher actually spawns
-//! next.
-//!
-//! # Reading the file, not asking the program
-//!
-//! The signature is verified by reading `launcher.exe`'s bytes off the disk,
-//! never by running it and asking. A binary that reports its own trustworthiness
-//! tells you nothing — a hostile one prints whatever makes it look legitimate —
-//! and to ask, you would first have to execute the very thing you are deciding
-//! whether to permit. So nothing here spawns anything, and neither does anything
-//! downstream of it: the launcher's version comes out of the signature too (see
-//! [`crate::volume`]), so by the time this listener runs a launcher at all, it
-//! has already asked every question it has.
-//!
-//! # Holding the file still
-//!
-//! Verifying bytes and then executing a *path* is two different files if
-//! anything can change the disk in between — and the disk in question was
-//! plugged in by a stranger. So the file is opened once, denying writes and
-//! deletes to everyone else for as long as the handle lives, and that handle
-//! rides along in [`Trusted`] until the launcher has been started. It does not
-//! stop hostile USB *firmware*, which lies below the filesystem and can serve
-//! different bytes on a second read; it does stop anything going through
-//! Windows.
+//! Verifies `<root>/launcher.exe` against the anchors compiled into this build,
+//! holding the file open while it is checked, and phrases the refusal when it
+//! fails. Reads the bytes; runs nothing.
+
+// ########## IS THIS VOLUME A CARTRIDGE ##########
 
 use std::fmt;
 use std::fs::File;
@@ -52,19 +17,15 @@ use std::path::{Path, PathBuf};
 
 use trust::Anchor;
 
-// `ANCHORS: &[Anchor]`, written by build.rs from keys/*.pub. Compiled in rather
-// than read from disk: a trust anchor sitting in a writable file beside the exe
-// would let anything that could edit it grant itself auto-run. See build.rs.
+// `ANCHORS: &[Anchor]`, written by build.rs from keys/*.pub and pasted in here
+// at compile time. Compiled in rather than read from disk: an anchor sitting in
+// a writable file beside the exe would let anything able to edit it grant
+// itself auto-run.
 include!(concat!(env!("OUT_DIR"), "/trust_anchors.rs"));
 
-/// The binary a cartridge is expected to carry, by name.
-///
-/// Hardcoded per platform, where the retired marker let the cartridge name its
-/// own launcher. That field existed so a Linux cartridge could point at a
-/// different binary; a `cfg` covers the same case without handing an untrusted
-/// disk a say in which path gets executed — which is why the old code needed a
-/// containment check to stop `..\..\windows\system32\cmd.exe` from being a valid
-/// answer. There is now no path to sandbox.
+/// The binary a cartridge is expected to carry, by name. Hardcoded per platform
+/// rather than named by the disk, so there is no attacker-supplied path to
+/// sandbox in the first place.
 #[cfg(windows)]
 pub const LAUNCHER_NAME: &str = "launcher.exe";
 #[cfg(not(windows))]
@@ -79,20 +40,17 @@ pub struct Trusted {
     /// launcher's version without the launcher having been asked.
     pub version: String,
     /// The open handle the bytes were read through, kept alive so the file
-    /// cannot be swapped between verifying it and running it. Never touched
-    /// again — its lifetime *is* its purpose.
+    /// cannot be swapped between verifying it and running it. Never read; the
+    /// leading `_` marks it as held for its lifetime alone.
     _lock: File,
 }
 
-/// Why a volume is not a cartridge worth launching.
-///
-/// Every variant ends the same way — the volume is ignored — but they are
-/// distinct because the log is the only diagnostic this program has, and
-/// "ordinary USB stick" and "someone tampered with a cartridge" should not read
-/// alike.
+/// Why a volume is not a cartridge worth launching. Every variant ends the same
+/// way, but they stay distinct because the log is this program's only
+/// diagnostic and "ordinary USB stick" must not read like "someone tampered".
 pub enum Refusal {
-    /// No launcher at the volume root. Overwhelmingly the common case: an
-    /// ordinary drive. Not a problem, and deliberately not alarming.
+    /// No launcher at the volume root — every ordinary drive, and by far the
+    /// most common outcome.
     NoLauncher,
     Unreadable(String),
     /// It is there, and its signature does not make it something we will run.
@@ -100,34 +58,35 @@ pub enum Refusal {
 }
 
 impl fmt::Display for Refusal {
+    // `fmt` is fixed by the Display trait, so it keeps rustc's spelling.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Refusal::NoLauncher => write!(f, "no {LAUNCHER_NAME} at the volume root"),
             Refusal::Unreadable(e) => write!(f, "{LAUNCHER_NAME} could not be read: {e}"),
-            // The trailing anchor list only helps on the one refusal it explains,
-            // and would be noise on the rest.
+            // The anchor list only helps on the one refusal it explains, so it
+            // is spelled out here instead of appended to every variant.
             Refusal::Signature(trust::Refusal::Untrusted) => write!(
                 f,
                 "{LAUNCHER_NAME} is signed, but not by a key this listener trusts ({})",
-                anchor_names()
+                anchorNames()
             ),
             Refusal::Signature(reason) => write!(f, "{LAUNCHER_NAME}: {reason}"),
         }
     }
 }
 
-/// Verifies `<root>/launcher.exe` against every baked-in anchor.
-pub fn verify_launcher(root: &Path) -> Result<Trusted, Refusal> {
+/// Verifies `<root>/launcher.exe` against every baked-in anchor, returning the
+/// held-open file and what its signature says, or why it was refused.
+pub fn verifyLauncher(root: &Path) -> Result<Trusted, Refusal> {
     let path = root.join(LAUNCHER_NAME);
     if !path.is_file() {
         return Err(Refusal::NoLauncher);
     }
 
-    // Read the lot. A launcher is a few megabytes and this happens once per
-    // volume arrival, against a disk that was just mounted — the alternative,
-    // minisign's streaming verification, only works on pre-hashed signatures and
-    // would buy nothing here.
-    let (file, bytes) = read_locked(&path).map_err(|e| Refusal::Unreadable(e.to_string()))?;
+    // Read the lot into memory. A launcher is a few megabytes and this happens
+    // once per volume arrival; minisign's streaming verification only works on
+    // pre-hashed signatures and would buy nothing here.
+    let (file, bytes) = readLocked(&path).map_err(|e| Refusal::Unreadable(e.to_string()))?;
 
     let attested =
         trust::attest(&bytes, ANCHORS, trust::LAUNCHER_ROLE).map_err(Refusal::Signature)?;
@@ -136,26 +95,31 @@ pub fn verify_launcher(root: &Path) -> Result<Trusted, Refusal> {
         path,
         anchor: attested.anchor,
         version: attested.version,
+        // Moved into the struct, so the lock is released only when the caller
+        // drops it — after the launcher has been started.
         _lock: file,
     })
 }
 
-/// Opens `path` so that nothing else can write to or delete it while the handle
-/// lives, and reads it.
+/// Opens `path` so nothing else can write to or delete it while the handle
+/// lives, and reads it. Returns the still-open handle alongside the bytes.
 ///
-/// `share_mode(FILE_SHARE_READ)` is the whole trick: other readers are still
-/// allowed — the image loader needs one to start the process — while writers and
-/// deleters are refused for as long as the returned handle is held. Plain
-/// `File::open` asks for the permissive default and would leave the file free to
-/// change between here and the spawn.
+/// Verifying bytes and then executing a *path* is two different files if
+/// anything can change the disk in between, and the disk was plugged in by a
+/// stranger. This does not stop hostile USB firmware, which lies below the
+/// filesystem; it stops everything going through Windows.
 #[cfg(windows)]
-fn read_locked(path: &Path) -> std::io::Result<(File, Vec<u8>)> {
+fn readLocked(path: &Path) -> std::io::Result<(File, Vec<u8>)> {
+    // The extension trait that adds `share_mode` to OpenOptions.
     use std::os::windows::fs::OpenOptionsExt;
 
     /// `windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ`, spelled out
-    /// rather than pulling the crate in on a non-Windows-only path.
+    /// rather than pulling that crate onto a path this file otherwise shares.
     const FILE_SHARE_READ: u32 = 0x0000_0001;
 
+    // Sharing *reads* and nothing else is the whole trick: the image loader
+    // still needs a read handle to start the process, while writers and
+    // deleters are refused. Plain `File::open` asks for the permissive default.
     let mut file = std::fs::OpenOptions::new()
         .read(true)
         .share_mode(FILE_SHARE_READ)
@@ -166,18 +130,19 @@ fn read_locked(path: &Path) -> std::io::Result<(File, Vec<u8>)> {
 }
 
 /// Unix has no share modes — an open handle excludes nothing — so this is a
-/// plain read. The handle is still returned and still held, so the two builds
-/// have one shape rather than two.
+/// plain read. The handle is still returned and still held, so both builds have
+/// one shape rather than two.
 #[cfg(not(windows))]
-fn read_locked(path: &Path) -> std::io::Result<(File, Vec<u8>)> {
+fn readLocked(path: &Path) -> std::io::Result<(File, Vec<u8>)> {
     let mut file = File::open(path)?;
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes)?;
     Ok((file, bytes))
 }
 
-/// The anchors this build carries, for the log line and `--signature`.
-pub fn anchor_names() -> String {
+/// The anchors this build carries, comma-separated, for the log line and
+/// `--signature`.
+pub fn anchorNames() -> String {
     ANCHORS
         .iter()
         .map(|a| a.name)

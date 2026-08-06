@@ -4,17 +4,11 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! Wizard state: which screen, and everything the screens read and write.
-//!
-//! The routing rule from `../structure.md` lives in [`App::choose_volume`] and
-//! nowhere else: a volume that already carries a launcher goes to edit, one
-//! without goes to create. Both then use the same games screen and the same
-//! write, because they *are* the same job with a different starting catalog.
-//!
-//! There is no key screen and no pairing step. A cartridge's identity is the
-//! signature inside the `launcher.exe` this installer carries, so creating one
-//! is just writing files — there is nothing for the user to choose, copy down,
-//! or keep in step between two machines.
+//! Holds the wizard's state: the current screen, the chosen volume, the games
+//! being added or removed, and the running job. `chooseVolume` is where the
+//! create-vs-edit routing decision is made.
+
+// ########## WIZARD STATE ##########
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -70,7 +64,7 @@ pub struct Draft {
 impl Draft {
     fn new(ctx: &egui::Context, source: PathBuf) -> Draft {
         Draft {
-            name: detect::default_name(&source),
+            name: detect::defaultName(&source),
             scanning: Some(Scanning::start(ctx, source.clone())),
             source,
             scan: None,
@@ -92,7 +86,7 @@ impl Draft {
         // to call, the field is left empty and the user has to choose — a guess
         // presented as a decision is worse than no guess.
         self.selected = scan
-            .clear_winner()
+            .clearWinner()
             .and_then(|winner| scan.candidates.iter().position(|c| c == winner));
         self.scan = Some(scan);
     }
@@ -102,7 +96,7 @@ impl Draft {
     }
 
     /// The chosen executable, relative to the game folder.
-    pub fn exe_relative(&self) -> Option<PathBuf> {
+    pub fn exeRelative(&self) -> Option<PathBuf> {
         if let Some(manual) = &self.manual_exe {
             return Some(manual.clone());
         }
@@ -113,7 +107,7 @@ impl Draft {
     /// Accepts a hand-picked exe, which must be inside the game folder — the
     /// copy only moves that folder, so an exe from anywhere else would be a
     /// catalog entry pointing at a file that never shipped.
-    pub fn set_manual_exe(&mut self, chosen: &Path) -> Result<(), String> {
+    pub fn setManualExe(&mut self, chosen: &Path) -> Result<(), String> {
         let relative = chosen
             .strip_prefix(&self.source)
             .map_err(|_| format!("Pick an executable inside {}.", self.source.display()))?;
@@ -122,8 +116,8 @@ impl Draft {
         Ok(())
     }
 
-    pub fn set_image(&mut self, chosen: PathBuf) {
-        self.image_warning = image::ratio_warning(&chosen);
+    pub fn setImage(&mut self, chosen: PathBuf) {
+        self.image_warning = image::ratioWarning(&chosen);
         self.image = Some(chosen);
     }
 
@@ -135,7 +129,7 @@ impl Draft {
         if self.name.trim().is_empty() {
             return Some("needs a name".into());
         }
-        if self.exe_relative().is_none() {
+        if self.exeRelative().is_none() {
             return Some(match self.scan.as_ref().map(|s| s.candidates.is_empty()) {
                 Some(true) => "no executable was found — pick one".into(),
                 _ => "needs an executable".into(),
@@ -169,14 +163,11 @@ pub struct App {
     pub remove: Vec<bool>,
 
     /// Edit mode: set when the cartridge's launcher states a version other than
-    /// `version::bundled()`. `None` covers "not a cartridge", "matches", and "its
-    /// signature carries no version we can read" alike — none of those are a
-    /// reason to offer an update.
-    ///
-    /// Read straight off the verified signature when the volume was picked, so
-    /// there is no pending state and nothing to poll. It used to be the answer
-    /// to running the file.
-    pub stale_launcher: Option<Version>,
+    /// `version::bundled()`. `None` covers "not a cartridge", "matches" and
+    /// "carries no readable version" alike — none is a reason to offer an
+    /// update. Read off the verified signature when the volume was picked, so
+    /// there is no pending state and nothing to poll.
+    pub staleLauncher: Option<Version>,
 
     pub drafts: Vec<Draft>,
     pub job: Option<Job>,
@@ -204,7 +195,7 @@ impl App {
             name: String::new(),
             existing: Vec::new(),
             remove: Vec::new(),
-            stale_launcher: None,
+            staleLauncher: None,
             drafts: Vec::new(),
             job: None,
             outcome: None,
@@ -218,13 +209,13 @@ impl App {
         }
     }
 
-    pub fn refresh_volumes(&mut self) {
+    pub fn refreshVolumes(&mut self) {
         let previous = self.volume().map(|v| v.root.clone());
         self.volumes = volume::list();
         self.target = previous.and_then(|root| self.volumes.iter().position(|v| v.root == root));
     }
 
-    pub fn refresh_listeners(&mut self) {
+    pub fn refreshListeners(&mut self) {
         self.listener_installs = listener::find();
     }
 
@@ -232,15 +223,14 @@ impl App {
         self.target.and_then(|i| self.volumes.get(i))
     }
 
-    /// The routing decision, and the only place it is made.
-    /// No `ctx`: this used to start a background probe and needed something to
-    /// wake the UI when it answered. Everything it decides is now known the
-    /// moment the drive was listed.
-    pub fn choose_volume(&mut self, index: usize) {
+    /// Picks `volume` and routes to edit or create, the only place that
+    /// decision is made. Everything it needs is already known from the drive
+    /// listing, so nothing here is asynchronous.
+    pub fn chooseVolume(&mut self, index: usize) {
         self.target = Some(index);
         self.drafts.clear();
         self.error = None;
-        self.stale_launcher = None;
+        self.staleLauncher = None;
 
         let Some(volume) = self.volumes.get(index) else {
             return;
@@ -278,7 +268,7 @@ impl App {
                     // "does the cartridge have the newest launcher this
                     // installer knows how to write", not "will these two
                     // programs still talk to each other".
-                    self.stale_launcher = match (
+                    self.staleLauncher = match (
                         volume.launcher_version.as_deref().and_then(version::parse),
                         version::bundled(),
                     ) {
@@ -306,7 +296,7 @@ impl App {
         }
     }
 
-    pub fn add_game(&mut self, ctx: &egui::Context, folder: PathBuf) {
+    pub fn addGame(&mut self, ctx: &egui::Context, folder: PathBuf) {
         if self.drafts.iter().any(|d| d.source == folder) {
             self.error = Some(format!(
                 "{} is already in this list.",
@@ -319,8 +309,8 @@ impl App {
         // merged. Renaming produces two entries the user can't tell apart;
         // overwriting destroys an install that may be many gigabytes and may be
         // the only copy. Refusing costs one click — remove the old one first.
-        let slug = catalog::slug(&detect::default_name(&folder));
-        if cartridge::taken_slugs(&self.kept_entries()).contains(&slug) {
+        let slug = catalog::slug(&detect::defaultName(&folder));
+        if cartridge::takenSlugs(&self.keptEntries()).contains(&slug) {
             self.error = Some(format!(
                 "This cartridge already has a game in games/{slug}. \
                  Remove it below first, or rename the folder you are adding."
@@ -331,7 +321,7 @@ impl App {
     }
 
     /// Catalog entries that survive this edit.
-    pub fn kept_entries(&self) -> Vec<Entry> {
+    pub fn keptEntries(&self) -> Vec<Entry> {
         self.existing
             .iter()
             .zip(self.remove.iter().chain(std::iter::repeat(&false)))
@@ -340,7 +330,7 @@ impl App {
             .collect()
     }
 
-    pub fn removed_entries(&self) -> Vec<Entry> {
+    pub fn removedEntries(&self) -> Vec<Entry> {
         self.existing
             .iter()
             .zip(self.remove.iter().chain(std::iter::repeat(&false)))
@@ -375,18 +365,18 @@ impl App {
         // take stops the Review button rather than the last step of a copy that
         // has already run for minutes.
         let name = self.name.trim();
-        volume::validate_label(name, &volume.fs)?;
+        volume::validateLabel(name, &volume.fs)?;
 
-        let keep = self.kept_entries();
-        let mut taken: HashSet<String> = cartridge::taken_slugs(&keep);
+        let keep = self.keptEntries();
+        let mut taken: HashSet<String> = cartridge::takenSlugs(&keep);
         let add = self
             .drafts
             .iter()
             .map(|draft| PlannedGame {
-                slug: catalog::unique_slug(&draft.name, &mut taken),
+                slug: catalog::uniqueSlug(&draft.name, &mut taken),
                 source: draft.source.clone(),
                 name: draft.name.trim().to_string(),
-                exe_relative: draft.exe_relative().expect("checked by blocker above"),
+                exeRelative: draft.exeRelative().expect("checked by blocker above"),
                 image: draft.image.clone().expect("checked by blocker above"),
                 bytes: draft.bytes(),
             })
@@ -395,16 +385,16 @@ impl App {
         Ok(Plan {
             root: volume.root.clone(),
             keep,
-            remove: self.removed_entries(),
+            remove: self.removedEntries(),
             add,
             label: (name != volume.label).then(|| name.to_string()),
         })
     }
 
     /// Free space, minus what the plan needs — negative when it won't fit.
-    pub fn space_shortfall(&self, plan: &Plan) -> Option<u64> {
+    pub fn spaceShortfall(&self, plan: &Plan) -> Option<u64> {
         let free = self.volume()?.free_bytes;
-        let needed = plan.required_bytes();
+        let needed = plan.requiredBytes();
         (needed > free).then(|| needed - free)
     }
 
@@ -444,18 +434,18 @@ impl App {
         self.screen = Screen::Working;
     }
 
-    pub fn install_listener(&mut self, ctx: &egui::Context) {
+    pub fn installListener(&mut self, ctx: &egui::Context) {
         let start_now = self.listener_start_now;
         let suppress_autoplay = self.suppress_autoplay;
-        self.start_listener_job(ctx, "Installing the listener", move || {
+        self.startListenerJob(ctx, "Installing the listener", move || {
             listener::install(start_now, suppress_autoplay)
         });
     }
 
     /// Removes the listener at `dir` — which is the one in
-    /// `listener::install_dir()`, or a folder an earlier build used.
-    pub fn uninstall_listener(&mut self, ctx: &egui::Context, dir: PathBuf) {
-        self.start_listener_job(ctx, "Removing the listener", move || {
+    /// `listener::installDir()`, or a folder an earlier build used.
+    pub fn uninstallListener(&mut self, ctx: &egui::Context, dir: PathBuf) {
+        self.startListenerJob(ctx, "Removing the listener", move || {
             listener::uninstall(&dir)
         });
     }
@@ -463,7 +453,7 @@ impl App {
     /// Both job-2 operations are over in well under a second but still go
     /// through the worker, so the one Working/Done pair of screens reports every
     /// outcome in the program the same way.
-    fn start_listener_job<F>(&mut self, ctx: &egui::Context, title: &str, task: F)
+    fn startListenerJob<F>(&mut self, ctx: &egui::Context, title: &str, task: F)
     where
         F: FnOnce() -> Result<Vec<String>, String> + Send + 'static,
     {
@@ -481,17 +471,16 @@ impl App {
         self.screen = Screen::Working;
     }
 
-    /// Rewrites just `launcher.exe` on the current cartridge, independent of the
-    /// games plan — the fast path for a cartridge whose games and name are fine
-    /// and only its launcher is behind. `cartridge::apply` also refreshes it, but
-    /// only as part of a plan that changes something else, and there is
-    /// deliberately no way to reach Review with an empty one — see
-    /// `Plan::is_empty`.
-    pub fn update_launcher(&mut self, ctx: &egui::Context) {
+    /// Rewrites just `launcher.exe` on the current cartridge, independent of
+    /// the games plan. `cartridge::apply` also refreshes it, but only as part
+    /// of a plan that changes something else — an empty plan cannot reach
+    /// Review (`Plan::isEmpty`), so this is the only route for a cartridge
+    /// whose games and name are already correct.
+    pub fn updateLauncher(&mut self, ctx: &egui::Context) {
         let Some(root) = self.volume().map(|v| v.root.clone()) else {
             return;
         };
-        self.start_listener_job(ctx, "Updating the launcher", move || {
+        self.startListenerJob(ctx, "Updating the launcher", move || {
             let bytes = payload::launcher()?;
             copy::bytes(&root.join(cartridge::LAUNCHER_NAME), &bytes).map_err(|e| e.message())?;
             Ok(vec!["Updated launcher.exe".into()])
@@ -499,15 +488,15 @@ impl App {
     }
 
     /// Moves a finished job onto the Done screen.
-    pub fn poll_job(&mut self) {
+    pub fn pollJob(&mut self) {
         let Some(job) = &mut self.job else { return };
         job.poll();
         if job.finished() {
             let job = self.job.take().expect("just checked");
             self.outcome = job.outcome;
             self.screen = Screen::Done;
-            self.refresh_volumes();
-            self.refresh_listeners();
+            self.refreshVolumes();
+            self.refreshListeners();
         }
     }
 

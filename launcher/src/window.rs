@@ -4,27 +4,10 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! How big the window is, and where it sits.
-//!
-//! The size is decided here, before the page ever loads: no measure-and-report
-//! round-trip. The page (`src/layout.js`) then reproduces the same fit
-//! independently from the same two numbers (the gap and the border gap reach it
-//! as `GAP` and `PAD`), so the two agree without talking to each other.
-//!
-//! # What the game count does and doesn't decide
-//!
-//! It decides the window's **width** — how many covers stand side by side —
-//! between a floor of [`MIN_VISIBLE_COVERS`] and however many the screen's width
-//! cap allows. It does not touch a cover's **size**: a cartridge with thirty
-//! games shows the same cover as one with three, and the page scrolls the row
-//! sideways for the ones that don't fit. That is the whole point of the
-//! arrangement — a long catalog costs scrolling, not legibility.
-//!
-//! A cover shrinks for the screen and nothing else: a display too short to hold
-//! one at its native height, or too narrow to stand three of them side by side.
-//! Where there is room, the art is shown at the resolution it was drawn at.
-//!
-//! The caps, the floor and the native cover size live in [`crate::constants`].
+//! Computes the window's size in logical pixels from the game count and the
+//! screen's caps, then centres it, rounds its corners and raises it.
+
+// ########## WINDOW SIZE AND PLACEMENT ##########
 
 use tao::dpi::{PhysicalPosition, Position};
 
@@ -131,7 +114,7 @@ pub fn size<T>(
 /// A radius of 0 leaves the window square — the region is cleared rather than
 /// replaced, so this is also how somebody turns the feature off.
 #[cfg(windows)]
-pub fn round_corners(window: &tao::window::Window, radius: f64) {
+pub fn roundCorners(window: &tao::window::Window, radius: f64) {
     use tao::platform::windows::WindowExtWindows;
     use windows_sys::Win32::Foundation::{HWND, POINT, RECT};
     use windows_sys::Win32::Graphics::Dwm::{
@@ -216,7 +199,7 @@ pub fn round_corners(window: &tao::window::Window, radius: f64) {
 /// Nothing to do off Windows: this crate's window rounding is entirely a
 /// Win32 affair, and the rest of the launcher builds without it.
 #[cfg(not(windows))]
-pub fn round_corners(_window: &tao::window::Window, _radius: f64) {}
+pub fn roundCorners(_window: &tao::window::Window, _radius: f64) {}
 
 /// Puts the window in the middle of the primary monitor. Physical pixels here,
 /// because a screen position is not a CSS length.
@@ -258,6 +241,6 @@ pub fn raise(window: &tao::window::Window) {
 /// Ends the [`raise`] grace period, putting the window back in the normal
 /// z-order. Separate from `raise` because the wait between them belongs to the
 /// event loop, which is the only thing that can wait without blocking the UI.
-pub fn drop_topmost(window: &tao::window::Window) {
+pub fn dropTopmost(window: &tao::window::Window) {
     window.set_always_on_top(false);
 }

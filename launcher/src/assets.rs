@@ -4,17 +4,11 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! The `app://` protocol: everything the page asks for, answered from memory
-//! or from the content folder.
-//!
-//! Served over a custom protocol rather than `file://` because on Windows this
-//! resolves to a proper `http://app.localhost/...` origin, which keeps wry's
-//! IPC (the close and launch clicks) working — a `file:///C:/...` origin isn't
-//! a URI wry's IPC plumbing can parse and crashes the moment the page posts a
-//! message back.
-//!
-//! Two sources answer requests: the UI (baked into the exe, or read live from
-//! `src/` during development) and cartridge content on disk beside the exe.
+//! Answers `app://` requests: the embedded UI (or `src/` during development),
+//! the embedded font, and cartridge content read from the folder beside the
+//! exe. Picks the MIME type and builds the HTTP response.
+
+// ########## THE APP:// PROTOCOL ##########
 
 use std::borrow::Cow;
 use std::fs;
@@ -26,7 +20,7 @@ use wry::http::{Request, Response, header::CONTENT_TYPE};
 /// The UI assets, baked into the exe at compile time and served over the
 /// `app://` protocol at runtime. They live in `src/` beside the Rust source,
 /// so the include list keeps the Rust files and the seed files (config.toml,
-/// catalog.json) out of the bundle — `is_ui_asset` mirrors it at runtime.
+/// catalog.json) out of the bundle — `isUiAsset` mirrors it at runtime.
 #[derive(RustEmbed)]
 #[folder = "src/"]
 #[include = "*.html"]
@@ -34,48 +28,36 @@ use wry::http::{Request, Response, header::CONTENT_TYPE};
 #[include = "*.js"]
 struct UiAssets;
 
-/// The typeface, baked in the same way and for the same reason.
+/// The typeface, baked in the same way. A second struct because rust-embed
+/// takes one folder each, and the font lives in `launcher/assets/fonts/` rather
+/// than in `src/` beside the Rust sources.
 ///
-/// A second struct because rust-embed takes one folder each, and the font does
-/// not belong in `src/` beside the Rust sources — it lives in
-/// `launcher/assets/fonts/` and is served at the URL `fonts/BackOut.woff2`.
-///
-/// **Embedded rather than shipped on the cartridge, deliberately.** A font in
-/// `output/` is a file that can be deleted, missed by a hand-copy, or left
-/// behind when somebody moves a cartridge's contents — and the launcher would
-/// then silently fall back to a system face. Compiled in, it is exactly as
-/// present as the code that asks for it. It is also the strongest form of "no
-/// network": there is nothing to fetch even in principle.
+/// Embedded rather than shipped on the cartridge: a font in `output/` can be
+/// deleted or missed by a hand-copy, and the launcher would then silently fall
+/// back to a system face.
 #[derive(RustEmbed)]
 #[folder = "assets/"]
 #[include = "fonts/*.woff2"]
 struct FontAssets;
 
-/// Extensions the `app://` protocol will serve as UI assets. Mirrors the
-/// rust-embed include list above so the live-from-`src/` dev path can't hand
-/// out the Rust sources or the seed files. Deliberately kept here rather than
-/// in `constants`: the two lists are one rule, and apart they drift.
+/// Extensions the `app://` protocol will serve as UI assets, mirroring the
+/// rust-embed include list above so the live-from-`src/` dev path cannot hand
+/// out the Rust sources or the seed files. Kept here rather than in
+/// `constants`, because the two lists are one rule and apart they drift.
 ///
-/// The length is spelled out so that adding an extension to one list and
-/// forgetting the other is a compile error rather than a 404.
+/// The two fail differently: this one gates *both* paths, so a missing
+/// extension 404s the first time you run it. The rust-embed list gates only the
+/// deployed binary, where the 404 first appears on a cartridge — so test a
+/// change to either on the built `output/launcher.exe`, not just in dev.
 ///
-/// **The two lists fail differently, and only one of them fails visibly.**
-/// This list gates *both* paths (see `is_ui_asset`, applied above the dev
-/// branch in `handle_request`), so an extension missing here 404s everywhere
-/// and shows up the first time you run it. The rust-embed list above gates
-/// only the deployed binary: under `cargo run` the dev path reads the file
-/// straight off disk and everything works perfectly, and the 404 appears for
-/// the first time on a cartridge. Test a change to either on the built
-/// `output/launcher.exe`, not just in dev.
-///
-/// `woff2` is not here: the font is answered from [`FontAssets`] before this
-/// gate is reached, and there is no `src/` copy for the dev path to serve.
+/// `woff2` is absent because the font is answered from `FontAssets` before this
+/// gate is reached.
 const UI_ASSET_EXTENSIONS: [&str; 3] = ["html", "css", "js"];
 
 /// Serves the UI from the baked-in `src/` assets, and `images/...` /
 /// `games/...` straight from the content folder beside the exe, so paths in
 /// catalog.json and `<img>` tags are just relative to the launcher's folder.
-pub fn handle_request(base_dir: &Path, request: Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
+pub fn handleRequest(base_dir: &Path, request: Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
     let mut path = request.uri().path().trim_start_matches('/');
     if path.is_empty() {
         path = "index.html";
@@ -86,8 +68,8 @@ pub fn handle_request(base_dir: &Path, request: Request<Vec<u8>>) -> Response<Co
     // which source owns a given path.
     if let Some(file) = FontAssets::get(path) {
         let bytes = file.data.into_owned();
-        let mime = mime_type_for(Path::new(path), &bytes);
-        return ok_response(mime, Cow::Owned(bytes));
+        let mime = mimeTypeFor(Path::new(path), &bytes);
+        return okResponse(mime, Cow::Owned(bytes));
     }
 
     // Cartridge content lives on disk beside the exe.
@@ -100,10 +82,10 @@ pub fn handle_request(base_dir: &Path, request: Request<Vec<u8>>) -> Response<Co
     if path.starts_with("assets/") || path.starts_with("images/") || path.starts_with("games/") {
         return match fs::read(base_dir.join(path)) {
             Ok(bytes) => {
-                let mime = mime_type_for(Path::new(path), &bytes);
-                ok_response(mime, Cow::Owned(bytes))
+                let mime = mimeTypeFor(Path::new(path), &bytes);
+                okResponse(mime, Cow::Owned(bytes))
             }
-            Err(_) => not_found(),
+            Err(_) => notFound(),
         };
     }
 
@@ -111,8 +93,8 @@ pub fn handle_request(base_dir: &Path, request: Request<Vec<u8>>) -> Response<Co
     // `src/` also holds the Rust sources and the config.toml / catalog.json
     // seeds, and neither the live path below nor rust-embed should ever hand
     // those out.
-    if !is_ui_asset(path) {
-        return not_found();
+    if !isUiAsset(path) {
+        return notFound();
     }
 
     // Prefer the live file from the source `src/` folder when it exists —
@@ -121,21 +103,21 @@ pub fn handle_request(base_dir: &Path, request: Request<Vec<u8>>) -> Response<Co
     // tree), fall back to the copy baked into the exe by rust-embed.
     let source_ui = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(path);
     if let Ok(bytes) = fs::read(&source_ui) {
-        let mime = mime_type_for(Path::new(path), &bytes);
-        return ok_response(mime, Cow::Owned(bytes));
+        let mime = mimeTypeFor(Path::new(path), &bytes);
+        return okResponse(mime, Cow::Owned(bytes));
     }
 
     match UiAssets::get(path) {
         Some(file) => {
             let bytes = file.data.into_owned();
-            let mime = mime_type_for(Path::new(path), &bytes);
-            ok_response(mime, Cow::Owned(bytes))
+            let mime = mimeTypeFor(Path::new(path), &bytes);
+            okResponse(mime, Cow::Owned(bytes))
         }
-        None => not_found(),
+        None => notFound(),
     }
 }
 
-fn ok_response(mime: &'static str, body: Cow<'static, [u8]>) -> Response<Cow<'static, [u8]>> {
+fn okResponse(mime: &'static str, body: Cow<'static, [u8]>) -> Response<Cow<'static, [u8]>> {
     Response::builder()
         .header(CONTENT_TYPE, mime)
         // Never let WebView2 cache app:// responses in its data folder:
@@ -146,7 +128,7 @@ fn ok_response(mime: &'static str, body: Cow<'static, [u8]>) -> Response<Cow<'st
         .unwrap()
 }
 
-fn not_found() -> Response<Cow<'static, [u8]>> {
+fn notFound() -> Response<Cow<'static, [u8]>> {
     Response::builder()
         .status(404)
         .body(Cow::Borrowed(&[][..]))
@@ -156,7 +138,7 @@ fn not_found() -> Response<Cow<'static, [u8]>> {
 /// Whether an `app://` path names one of the web files that make up the UI.
 /// Mirrors the rust-embed include list on `UiAssets`, so the dev (live from
 /// `src/`) and deployed (embedded) paths serve exactly the same set.
-fn is_ui_asset(path: &str) -> bool {
+fn isUiAsset(path: &str) -> bool {
     Path::new(path)
         .extension()
         .and_then(|e| e.to_str())
@@ -166,7 +148,7 @@ fn is_ui_asset(path: &str) -> bool {
 /// Sniffs the actual file content for images instead of trusting the
 /// extension: cover art dropped into `images/` isn't always what its name
 /// claims (e.g. an animated cover saved as `.png` that's actually WebP).
-fn mime_type_for(path: &Path, content: &[u8]) -> &'static str {
+fn mimeTypeFor(path: &Path, content: &[u8]) -> &'static str {
     if content.starts_with(b"\x89PNG\r\n\x1a\n") {
         return "image/png";
     }

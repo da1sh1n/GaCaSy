@@ -4,23 +4,15 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! Collects the installer's payload — the files it writes onto a cartridge and
-//! into the PC — and stages them in `OUT_DIR` for `include_bytes!`.
-//!
-//! Everything the installer produces is carried inside it: it never downloads
-//! anything. That makes **build order a hard dependency**: `launcher` and
-//! `listener` must be built `--release` before this crate, because their
-//! binaries are the payload.
-//!
-//! Staging through `OUT_DIR` rather than pointing `include_bytes!` straight at
-//! `target/release/launcher.exe` is what lets a missing artifact fail with a
-//! sentence you can act on, instead of a compiler error about a path.
-//!
-//! The two binaries are **compressed** on the way in — an exe is about half its
-//! size deflated, and this installer is the one file a user downloads. They come
-//! back out byte-identical, which they have to: the signature inside
-//! `launcher.exe` is what makes a cartridge a cartridge, and it is checked here
-//! against the uncompressed original before any of this happens.
+// Functions are camelCase in this project while variables stay snake_case,
+// which rustc's default lints object to. Silenced once, at the script's root.
+#![allow(non_snake_case)]
+
+//! Build script. Stages the payload — launcher, listener, seed files — into
+//! `OUT_DIR` for `include_bytes!`, deflating the two binaries and verifying
+//! their signatures first. Also writes the trust anchors this crate compiles in.
+
+// ########## STAGING THE PAYLOAD ##########
 
 use std::env;
 use std::fs;
@@ -47,10 +39,8 @@ struct Item {
     env_override: &'static str,
     /// Human-readable instruction printed when it is missing.
     remedy: &'static str,
-    /// The role its signature has to declare. Checked as well as the signature
-    /// itself, so a build cannot embed a signed *listener* in the slot the
-    /// cartridge's launcher comes out of — both are genuine, and only one of
-    /// them is the right program for the job.
+    /// The role this file's signature has to declare, checked alongside the
+    /// signature itself: one of `trust`'s `*_ROLE` constants.
     role: &'static str,
 }
 
@@ -59,7 +49,7 @@ fn main() {
 
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR is set by cargo"));
     let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
-    let release = release_dir(&out_dir, &manifest);
+    let release = releaseDir(&out_dir, &manifest);
 
     // The two binaries, then the three seed files. Seeds come from the source
     // tree, so they are always present and always current — the binaries are the
@@ -73,7 +63,7 @@ fn main() {
                 remedy: "cargo build --release -p launcher",
                 role: trust::LAUNCHER_ROLE,
             },
-            release.join(exe_name("launcher")),
+            release.join(exeName("launcher")),
         ),
         (
             Item {
@@ -83,7 +73,7 @@ fn main() {
                 remedy: "cargo build --release -p listener",
                 role: trust::LISTENER_ROLE,
             },
-            release.join(exe_name("listener")),
+            release.join(exeName("listener")),
         ),
     ];
 
@@ -116,7 +106,7 @@ fn main() {
             // Skipped under the escape hatch: that build is for working on the
             // UI, already refuses to install anything, and demanding a signed
             // payload from it would defeat the point of having it.
-            if !optional && let Err(problem) = check_signature(&source, &manifest, item.role) {
+            if !optional && let Err(problem) = checkSignature(&source, &manifest, item.role) {
                 missing.push(problem);
             }
             // Signature checked above, against these same bytes, before they are
@@ -165,8 +155,8 @@ fn main() {
         );
     }
 
-    stage_launcher_version(&out_dir, &manifest);
-    stage_trust_anchors(&out_dir, &manifest);
+    stageLauncherVersion(&out_dir, &manifest);
+    stageTrustAnchors(&out_dir, &manifest);
 }
 
 /// Writes `LAUNCHER_VERSION`, read from `../launcher/Cargo.toml`'s `[package].version`
@@ -176,7 +166,7 @@ fn main() {
 /// Unlike the binary payload above, there is no escape hatch here: this reads
 /// source, not a build artifact, so a missing or malformed manifest means the repo
 /// itself is broken and the build should fail loudly rather than stage a fallback.
-fn stage_launcher_version(out_dir: &Path, manifest: &Path) {
+fn stageLauncherVersion(out_dir: &Path, manifest: &Path) {
     let path = manifest.join("../launcher/Cargo.toml");
     println!("cargo::rerun-if-changed={}", path.display());
 
@@ -204,7 +194,7 @@ fn stage_launcher_version(out_dir: &Path, manifest: &Path) {
 /// directory is five levels up — which is the only way to find it that survives
 /// `CARGO_TARGET_DIR` being set. The workspace-relative guess is the fallback
 /// for when that shape ever changes.
-fn release_dir(out_dir: &Path, manifest: &Path) -> PathBuf {
+fn releaseDir(out_dir: &Path, manifest: &Path) -> PathBuf {
     out_dir
         .ancestors()
         .nth(4)
@@ -213,20 +203,15 @@ fn release_dir(out_dir: &Path, manifest: &Path) -> PathBuf {
         .unwrap_or_else(|| manifest.join("../target/release"))
 }
 
-/// Refuses a payload binary that the listener we are about to embed alongside it
-/// would not accept.
+/// Checks that `binary` carries a signature for `role` that the listener being
+/// embedded beside it would accept. Fails the build if not.
 ///
-/// This is the check that makes the whole scheme fail loudly instead of quietly.
-/// Signing happens *after* `cargo build` and *before* this crate is built (see
-/// `xtask release`), and every way of getting that order wrong — rebuilding the
-/// launcher after signing it, running a plain `cargo build --release`, signing
-/// with a key no listener trusts — produces an installer that works perfectly,
-/// writes a cartridge that looks perfect, and is then silently ignored by every
-/// listener on earth. The user's only symptom would be nothing happening.
-///
-/// So it fails here, at the one moment both halves are in the same room.
-fn check_signature(binary: &Path, manifest: &Path, role: &str) -> Result<(), String> {
-    let anchors = trust_anchors(manifest);
+/// This is the check that makes a bad build order fail loudly. Signing happens
+/// after `cargo build` and before this crate builds, and every way of getting
+/// that wrong yields an installer that works, writes a cartridge that looks
+/// perfect, and is then ignored by every listener — with no symptom at all.
+fn checkSignature(binary: &Path, manifest: &Path, role: &str) -> Result<(), String> {
+    let anchors = trustAnchors(manifest);
     if anchors.is_empty() {
         return Err(format!(
             "no public key to check {} against — expected {}",
@@ -268,7 +253,7 @@ fn check_signature(binary: &Path, manifest: &Path, role: &str) -> Result<(), Str
 }
 
 /// The public keys in `keys/`, read the same way `listener/build.rs` reads them.
-fn trust_anchors(manifest: &Path) -> Vec<(String, String)> {
+fn trustAnchors(manifest: &Path) -> Vec<(String, String)> {
     [("release", "romzeta.pub"), ("dev", "dev.pub")]
         .iter()
         .filter_map(|(name, file)| {
@@ -278,33 +263,27 @@ fn trust_anchors(manifest: &Path) -> Vec<(String, String)> {
             let key = text
                 .lines()
                 .map(str::trim)
-                .filter(|line| !line.is_empty() && !line.starts_with("untrusted comment:"))
-                .next_back()?;
+                .rfind(|line| !line.is_empty() && !line.starts_with("untrusted comment:"))?;
             Some((name.to_string(), key.to_string()))
         })
         .collect()
 }
 
-/// Writes the same `ANCHORS` constant `listener/build.rs` writes, for the
-/// installer to verify a cartridge's existing `launcher.exe` at runtime.
+/// Writes the same `ANCHORS` constant `listener/build.rs` writes, so the
+/// installer can verify a cartridge's existing `launcher.exe` at runtime.
+/// Compiled in rather than read from `keys/`: an anchor the user can edit is an
+/// anchor an attacker can edit.
 ///
-/// The installer needs this for the same reason the listener does and for one
-/// more: it is the program that decides whether a drive is already a cartridge,
-/// and it used to decide that by looking for a *file name* and then running it.
-/// Compiled in rather than read from `keys/` at runtime, because an anchor the
-/// user can edit is an anchor an attacker can edit.
-///
-/// Absent keys are not fatal here the way they are for the listener: a
-/// payload-less UI build (`ROMZETA_PAYLOAD_OPTIONAL`) has nothing to verify and
-/// already refuses to install anything. An empty list means nothing verifies,
-/// which is the safe direction.
-fn stage_trust_anchors(out_dir: &Path, manifest: &Path) {
+/// Unlike the listener's, absent keys are not fatal here — a payload-less UI
+/// build has nothing to verify, and an empty list verifies nothing, which is
+/// the safe direction to fail in.
+fn stageTrustAnchors(out_dir: &Path, manifest: &Path) {
     let mut rust = String::from(
         "// Generated by build.rs. The public keys this binary trusts, in the\n\
          // order it tries them. Not configurable at runtime, by design.\n\
          pub const ANCHORS: &[Anchor] = &[\n",
     );
-    for (name, key) in trust_anchors(manifest) {
+    for (name, key) in trustAnchors(manifest) {
         rust.push_str(&format!(
             "    Anchor {{ name: {name:?}, base64: {key:?} }},\n"
         ));
@@ -313,7 +292,7 @@ fn stage_trust_anchors(out_dir: &Path, manifest: &Path) {
     fs::write(out_dir.join("trust_anchors.rs"), rust).expect("write trust_anchors.rs");
 }
 
-fn exe_name(stem: &str) -> String {
+fn exeName(stem: &str) -> String {
     if cfg!(windows) {
         format!("{stem}.exe")
     } else {
@@ -321,14 +300,11 @@ fn exe_name(stem: &str) -> String {
     }
 }
 
-/// Copies one payload file into `OUT_DIR`. A failure here is a broken build
-/// environment, not a user mistake, so it panics rather than reporting.
-/// Compresses one payload binary into `OUT_DIR`, returning its original size.
+/// Compresses one payload binary from `source` into `staged`, returning its
+/// original uncompressed size. Panics on failure.
 ///
-/// zlib rather than raw deflate, for the six bytes of header and the Adler-32
-/// trailer. These are the bytes a cartridge's identity is made of — see
-/// payload.rs — so a checksum over them is worth more than the six bytes it
-/// costs. The exes go to roughly half their size.
+/// zlib rather than raw deflate: the six-byte header and the Adler-32 trailer
+/// checksum the bytes on the way back out.
 fn squeeze(source: &Path, staged: &Path) -> u64 {
     use std::io::Write as _;
 

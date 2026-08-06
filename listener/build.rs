@@ -4,32 +4,11 @@
 // v3.0 or later. Romzeta comes with ABSOLUTELY NO WARRANTY. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-//! Bakes the trusted public keys into `listener.exe`.
-//!
-//! # Why this is a build script and not a config file
-//!
-//! The listener's job is to decide whether to run a program off a disk someone
-//! just plugged in. The signature makes that decision unforgeable — but only as
-//! far as the list of keys it checks against is itself trustworthy. If that list
-//! were a line in `config.toml` beside the exe, anything able to write that file
-//! could append its own key and get arbitrary code auto-run on every insert. An
-//! attacker would not forge a signature; they would skip straight past the need
-//! for one. The trust anchor has to be at least as hard to change as the check
-//! it feeds, so it is compiled in, and changing it means replacing the binary.
-//!
-//! # The two keys
-//!
-//! `keys/romzeta.pub` is the release key and is committed. `keys/dev.pub` is
-//! whatever `cargo run -p xtask -- keygen` generated on this machine, and is
-//! gitignored. A listener trusts both, which is what makes a clone of this repo
-//! usable: your build accepts your cartridges *and* official ones, while an
-//! official listener still refuses yours.
-//!
-//! Either may be absent — a fresh clone has no dev key, and this repo has not
-//! cut a release yet — but **not both**, because a listener that trusts nothing
-//! would refuse every cartridge in existence and log its way through the
-//! confusion one volume at a time. That is a build error with an instruction
-//! attached, not a runtime surprise.
+//! Build script. Reads `keys/romzeta.pub` and `keys/dev.pub` and writes them
+//! into `OUT_DIR` as the `const ANCHORS` this crate compiles in. Both keys
+//! absent is a build error.
+
+// ########## BAKING IN THE TRUST ANCHORS ##########
 
 use std::fs;
 use std::path::PathBuf;
@@ -119,7 +98,6 @@ fn embed_resources() {}
 fn base64_line(text: &str) -> Option<String> {
     text.lines()
         .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with("untrusted comment:"))
-        .next_back()
+        .rfind(|line| !line.is_empty() && !line.starts_with("untrusted comment:"))
         .map(str::to_string)
 }
